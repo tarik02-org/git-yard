@@ -27,6 +27,7 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row as TableRow, Table};
 use serde::Serialize;
+use unicode_width::UnicodeWidthStr;
 
 use git_yard::config::Config;
 use git_yard::format::{self, truncate_end};
@@ -720,8 +721,8 @@ impl App {
             .map(|&index| &self.items[index]);
         let (mut project_width, mut branch_width) = (0, 0);
         for item in sample {
-            project_width = project_width.max(item.project.label.chars().count());
-            branch_width = branch_width.max(item.branch_text().chars().count());
+            project_width = project_width.max(item.project.label.width());
+            branch_width = branch_width.max(item.branch_text().width());
         }
         let available = usize::from(area.width).saturating_sub(2 + 5 + 3);
         let project_width = project_width.clamp(8, 30).min(available * 3 / 10);

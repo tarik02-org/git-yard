@@ -5,6 +5,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Cell, Paragraph, Row as TableRow, Table, TableState, Wrap};
+use unicode_width::UnicodeWidthStr;
 
 use git_yard::discovery::display_path;
 use git_yard::engine::DeleteState;
@@ -155,18 +156,18 @@ fn columns_for(width: u16, content: impl Fn(Col) -> usize) -> (Vec<Col>, Vec<u16
 fn content_width(row: &Row, column: Col) -> usize {
     let candidate = &row.candidate;
     match column {
-        Col::Repo => candidate.seed.repo_label.chars().count(),
-        Col::Branch => candidate.head_label().chars().count(),
+        Col::Repo => candidate.seed.repo_label.width(),
+        Col::Branch => candidate.head_label().width(),
         Col::Commit => {
             let subject = candidate
                 .git
                 .value()
                 .and_then(|git| git.subject.as_deref())
                 .unwrap_or("");
-            8 + subject.chars().count()
+            8 + subject.width()
         }
-        Col::Path => display_path(&candidate.seed.path).chars().count(),
-        Col::State => state_text(row).chars().count(),
+        Col::Path => display_path(&candidate.seed.path).width(),
+        Col::State => state_text(row).width(),
         _ => 0,
     }
 }
@@ -742,9 +743,14 @@ mod tests {
     fn truncation_keeps_the_informative_ends() {
         assert_eq!(truncate_end("feature/ABC-123-long", 10), "feature/A…");
         assert_eq!(truncate_end("short", 10), "short");
+        assert_eq!(truncate_end("漢字abc", 4), "漢…");
+        assert_eq!(truncate_end("e\u{301}abc", 3), "e\u{301}a…");
+        assert_eq!(truncate_end("👨‍👩‍👧‍👦abc", 3), "👨‍👩‍👧‍👦…");
+        assert_eq!(truncate_middle("漢字abc", 4), "…abc");
+        assert_eq!(truncate_end("abc", 0), "");
         let path = "~/work/bb/sub/sub.feature-SUB-1313";
         let shown = truncate_middle(path, 22);
-        assert_eq!(shown.chars().count(), 22);
+        assert_eq!(shown.width(), 22);
         assert!(
             shown.starts_with("~/work") && shown.ends_with("SUB-1313"),
             "{shown}"

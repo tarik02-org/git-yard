@@ -101,13 +101,10 @@ fn forge_remote(project: &Project) -> Option<(Forge, &Remote)> {
 
 /// Host of `https://host/…`, `ssh://user@host:port/…` or `user@host:path`.
 fn host(url: &str) -> Option<String> {
-    let rest = match url.split_once("://") {
-        Some((_, rest)) => rest,
-        None => url,
-    };
-    let authority = rest.split(['/', ':']).next()?;
-    let host = authority.rsplit('@').next()?;
-    (!host.is_empty()).then(|| host.to_lowercase())
+    gix::url::parse(url)
+        .ok()?
+        .host
+        .map(|host| host.to_lowercase())
 }
 
 pub fn fetch(forge: Forge, dir: &Path) -> Result<Vec<Request>> {
@@ -224,37 +221,9 @@ pub fn matches(request: &Request, entry: &Entry, project: &Project) -> bool {
 /// Parses RFC 3339 timestamps as both CLIs print them
 /// (`2026-10-05T12:34:56Z`, with optional fraction and offset).
 fn parse_time(text: &str) -> Option<Timestamp> {
-    let (date, time) = text.split_once('T')?;
-    let mut date = date.splitn(3, '-').map(|part| part.parse::<i64>().ok());
-    let (year, month, day) = (date.next()??, date.next()??, date.next()??);
-
-    let split = time.find(['Z', 'z', '+', '-']).unwrap_or(time.len());
-    let (clock, zone) = time.split_at(split);
-    let clock = clock.split('.').next()?;
-    let mut clock = clock.splitn(3, ':').map(|part| part.parse::<i64>().ok());
-    let (hour, minute, second) = (clock.next()??, clock.next()??, clock.next()??);
-
-    let offset = match zone.chars().next() {
-        None | Some('Z' | 'z') => 0,
-        Some(sign) => {
-            let (hours, minutes) = zone[1..].split_once(':')?;
-            let minutes = hours.parse::<i64>().ok()? * 60 + minutes.parse::<i64>().ok()?;
-            if sign == '-' {
-                -minutes * 60
-            } else {
-                minutes * 60
-            }
-        }
-    };
-
-    // Days from the civil date (Howard Hinnant's algorithm).
-    let year = if month <= 2 { year - 1 } else { year };
-    let era = year.div_euclid(400);
-    let year_of_era = year - era * 400;
-    let day_of_year = (153 * ((month + 9) % 12) + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(days * 86_400 + hour * 3600 + minute * 60 + second - offset)
+    text.parse::<jiff::Timestamp>()
+        .ok()
+        .map(|time| time.as_second())
 }
 
 #[cfg(test)]
@@ -275,6 +244,8 @@ mod tests {
             host("ssh://git@GitLab.corp:2222/o/r.git").as_deref(),
             Some("gitlab.corp")
         );
+        assert_eq!(host("ssh://git@[::1]:2222/o/r.git").as_deref(), Some("::1"));
+        assert_eq!(host("/work/project"), None);
     }
 
     #[test]
@@ -284,6 +255,8 @@ mod tests {
         assert_eq!(parse_time("2026-10-05T12:34:56.789Z"), Some(1_791_203_696));
         assert_eq!(parse_time("2026-10-05T14:34:56+02:00"), Some(1_791_203_696));
         assert_eq!(parse_time("garbage"), None);
+        assert_eq!(parse_time("2026-02-30T12:34:56Z"), None);
+        assert_eq!(parse_time("2026-10-05T12:34:56"), None);
     }
 
     #[test]

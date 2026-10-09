@@ -1,3 +1,6 @@
+use unicode_truncate::UnicodeTruncateStr;
+use unicode_width::UnicodeWidthStr;
+
 use crate::model::Integration;
 
 pub fn size(bytes: u64) -> String {
@@ -64,27 +67,24 @@ pub fn truncate_end(text: &str, width: usize) -> String {
     if width == 0 {
         return String::new();
     }
-    if text.chars().count() <= width {
+    if text.width() <= width {
         return text.to_owned();
     }
-    let mut result: String = text.chars().take(width.saturating_sub(1)).collect();
-    result.push('…');
-    result
+    let (start, _) = text.unicode_truncate(width - 1);
+    format!("{start}…")
 }
 
 /// Keeps the start and, preferably, the end: `~/work/…/project.branch`.
 pub fn truncate_middle(text: &str, width: usize) -> String {
-    let count = text.chars().count();
-    if count <= width {
+    if text.width() <= width {
         return text.to_owned();
     }
     if width < 2 {
         return truncate_end(text, width);
     }
     let head = (width - 1) / 3;
-    let tail = width - 1 - head;
-    let start: String = text.chars().take(head).collect();
-    let end: String = text.chars().skip(count - tail).collect();
+    let (start, start_width) = text.unicode_truncate(head);
+    let (end, _) = text.unicode_truncate_start(width - 1 - start_width);
     format!("{start}…{end}")
 }
 
