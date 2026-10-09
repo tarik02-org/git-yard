@@ -163,7 +163,11 @@ pub fn scan_repo(found: &FoundRepo, roots: &[PathBuf]) -> Result<RepoScan, git2:
         base: base.clone(),
     });
 
-    for name in repo.worktrees()?.iter().flatten() {
+    for name in repo
+        .worktrees()?
+        .iter()
+        .filter_map(|name| name.ok().flatten())
+    {
         let gitdir = common.join("worktrees").join(name);
         let (path, locked) = match repo.find_worktree(name) {
             Ok(worktree) => {
@@ -258,7 +262,13 @@ pub fn base_refs(repo: &Repository) -> Vec<BaseRef> {
     let remote_default = repo
         .find_reference("refs/remotes/origin/HEAD")
         .ok()
-        .and_then(|reference| reference.symbolic_target().map(str::to_owned))
+        .and_then(|reference| {
+            reference
+                .symbolic_target()
+                .ok()
+                .flatten()
+                .map(str::to_owned)
+        })
         .and_then(|target| {
             target
                 .strip_prefix("refs/remotes/origin/")

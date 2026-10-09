@@ -113,13 +113,13 @@ pub fn list_project(
     let remotes: Vec<Remote> = repo
         .remotes()?
         .iter()
-        .flatten()
+        .filter_map(|name| name.ok().flatten())
         .map(|name| Remote {
             name: name.to_owned(),
             url: repo
                 .find_remote(name)
                 .ok()
-                .and_then(|remote| remote.url().map(str::to_owned)),
+                .and_then(|remote| remote.url().ok().map(str::to_owned)),
         })
         .collect();
 
@@ -188,7 +188,7 @@ pub fn list_project(
     for item in repo.branches(Some(BranchType::Remote))? {
         let (branch, _) = item?;
         // `origin/HEAD` is a pointer to another remote branch.
-        if branch.get().symbolic_target().is_some() {
+        if branch.get().symbolic_target_bytes().is_some() {
             continue;
         }
         let Ok(Some(name)) = branch.name().map(|name| name.map(str::to_owned)) else {
@@ -235,7 +235,7 @@ fn describe(repo: &Repository, oid: Option<Oid>) -> (Option<Timestamp>, Option<S
     };
     (
         Some(commit.time().seconds()),
-        commit.summary().map(str::to_owned),
+        commit.summary().ok().flatten().map(str::to_owned),
     )
 }
 

@@ -50,7 +50,7 @@ pub fn assess(seed: &Seed, cache: &mut RepoCache) -> Result<GitFacts> {
         let last_commit = commit.as_ref().map(|commit| commit.time().seconds());
         let subject = commit
             .as_ref()
-            .and_then(|commit| commit.summary().map(str::to_owned));
+            .and_then(|commit| commit.summary().ok().flatten().map(str::to_owned));
         let integration = match (&head, tip) {
             (_, None) => Integration::Unborn,
             (head, Some(tip)) => integration(repo, head.branch(), tip, &seed.base)?,

@@ -119,10 +119,10 @@ fn package(binary: &Path, target: Target, output: &Path) -> Result<()> {
     }
     archive.into_inner()?.finish()?;
 
-    let checksum = Sha256::digest(fs::read(&archive_path)?);
+    let checksum = hex::encode(Sha256::digest(fs::read(&archive_path)?));
     fs::write(
         output.join(format!("{filename}.sha256")),
-        format!("{checksum:x}  {filename}\n"),
+        format!("{checksum}  {filename}\n"),
     )?;
     println!("{}", archive_path.display());
     Ok(())
