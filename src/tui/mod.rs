@@ -71,7 +71,7 @@ pub fn run(
                 Duration::from_secs(1)
             };
             select! {
-                recv(input) -> input => {
+                recv(input.events) -> input => {
                     // Key handlers read the order, so pending events are settled first.
                     app.model.settle();
                     let event = input.context("terminal input disconnected")?
@@ -103,6 +103,7 @@ pub fn run(
         }
         Ok(())
     })();
+    drop(input);
     drop(session);
 
     let fresh = app

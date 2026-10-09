@@ -85,7 +85,8 @@ pub fn run(
 
     let mut session = crate::terminal::stderr()?;
     let input = crate::terminal::input();
-    let choice = app.run_loop(&mut session.terminal, &input, &events);
+    let choice = app.run_loop(&mut session.terminal, &input.events, &events);
+    drop(input);
     drop(session);
     let choice = choice?;
 

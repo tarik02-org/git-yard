@@ -196,6 +196,9 @@ pub struct Dirty {
     pub changed: usize,
     pub untracked: usize,
     pub conflicted: usize,
+    /// Evidence for the paths and contents approved for removal.
+    #[serde(default)]
+    pub fingerprint: [u8; 20],
 }
 
 impl Dirty {

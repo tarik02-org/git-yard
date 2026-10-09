@@ -3,6 +3,9 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::io::Read;
+use std::os::unix::ffi::OsStrExt;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
@@ -215,30 +218,108 @@ pub fn dirty(worktree: &Path) -> Result<Dirty> {
         .untracked_files(UntrackedFiles::Collapsed)
         .index_worktree_rewrites(None)
         .index_worktree_submodules(Submodule::Given {
-            ignore: gix::submodule::config::Ignore::All,
+            ignore: gix::submodule::config::Ignore::None,
             check_dirty: false,
         })
         .into_iter(Vec::new())?;
 
     let mut result = Dirty::default();
+    let mut evidence = Vec::new();
     for item in items {
-        match item? {
-            Item::TreeIndex(_) => result.changed += 1,
+        let item = item?;
+        let detail = match &item {
+            Item::TreeIndex(change) => {
+                result.changed += 1;
+                Some(format!("{change:?}"))
+            }
             Item::IndexWorktree(index_worktree::Item::Modification { status, .. }) => {
                 match status {
-                    EntryStatus::Conflict { .. } => result.conflicted += 1,
-                    EntryStatus::Change(_) | EntryStatus::IntentToAdd => result.changed += 1,
+                    EntryStatus::Conflict { .. } => {
+                        result.conflicted += 1;
+                        Some(format!("{status:?}"))
+                    }
+                    EntryStatus::Change(_) | EntryStatus::IntentToAdd => {
+                        result.changed += 1;
+                        Some("changed".to_owned())
+                    }
                     // Only stat data differs; the content is unchanged.
-                    EntryStatus::NeedsUpdate(_) => {}
+                    EntryStatus::NeedsUpdate(_) => None,
                 }
             }
             Item::IndexWorktree(index_worktree::Item::DirectoryContents { entry, .. }) => {
                 if entry.status == gix::dir::entry::Status::Untracked {
                     result.untracked += 1;
+                    Some("untracked".to_owned())
+                } else {
+                    None
                 }
             }
-            Item::IndexWorktree(index_worktree::Item::Rewrite { .. }) => result.changed += 1,
+            Item::IndexWorktree(index_worktree::Item::Rewrite { .. }) => {
+                unreachable!("rewrite tracking is disabled")
+            }
+        };
+        if let Some(detail) = detail {
+            evidence.push((gix::path::from_bstr(item.location())?.into_owned(), detail));
         }
     }
+    if !evidence.is_empty() {
+        evidence.sort();
+        let mut hash = gix::hash::hasher(gix::hash::Kind::Sha1);
+        for (path, detail) in evidence {
+            hash_field(&mut hash, path.as_os_str().as_bytes());
+            hash_field(&mut hash, detail.as_bytes());
+            fingerprint_path(&worktree.join(path), &mut hash)?;
+        }
+        result
+            .fingerprint
+            .copy_from_slice(hash.try_finalize()?.as_bytes());
+    }
     Ok(result)
+}
+
+fn hash_field(hash: &mut gix::hash::Hasher, bytes: &[u8]) {
+    hash.update(&(bytes.len() as u64).to_le_bytes());
+    hash.update(bytes);
+}
+
+fn fingerprint_path(path: &Path, hash: &mut gix::hash::Hasher) -> Result<()> {
+    let meta = match fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            hash_field(hash, b"missing");
+            return Ok(());
+        }
+        Err(error) => return Err(error).with_context(|| format!("inspecting {}", path.display())),
+    };
+    hash_field(hash, &meta.permissions().mode().to_le_bytes());
+    if meta.is_symlink() {
+        hash_field(hash, fs::read_link(path)?.as_os_str().as_bytes());
+    } else if meta.is_file() {
+        hash_field(hash, &meta.len().to_le_bytes());
+        let mut file = fs::File::open(path)?;
+        let mut buffer = [0; 64 * 1024];
+        loop {
+            let read = file.read(&mut buffer)?;
+            if read == 0 {
+                break;
+            }
+            hash.update(&buffer[..read]);
+        }
+    } else if meta.is_dir() {
+        if path.join(".git").exists() {
+            let repo = Repository::open(path)?;
+            hash_field(hash, repo.head()?.peel_to_commit()?.id().as_bytes());
+            hash_field(hash, &dirty(path)?.fingerprint);
+        } else {
+            let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
+            children.sort_by_key(|entry| entry.file_name());
+            for child in children {
+                hash_field(hash, child.file_name().as_bytes());
+                fingerprint_path(&child.path(), hash)?;
+            }
+        }
+    } else {
+        anyhow::bail!("cannot safely fingerprint special file {}", path.display());
+    }
+    Ok(())
 }

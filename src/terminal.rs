@@ -1,7 +1,9 @@
 use std::io::{self, Stderr, Stdout, Write};
 use std::panic::{self, PanicHookInfo};
 use std::sync::Arc;
-use std::thread;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use crossbeam_channel::{Receiver, unbounded};
 use ratatui::Terminal;
@@ -76,16 +78,42 @@ impl Drop for Guard {
     }
 }
 
-pub fn input() -> Receiver<io::Result<Event>> {
+pub struct Input {
+    pub events: Receiver<io::Result<Event>>,
+    stopped: Arc<AtomicBool>,
+    worker: Option<JoinHandle<()>>,
+}
+
+impl Drop for Input {
+    fn drop(&mut self) {
+        self.stopped.store(true, Ordering::Relaxed);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
+pub fn input() -> Input {
     let (sender, receiver) = unbounded();
-    thread::spawn(move || {
-        loop {
-            let event = event::read();
+    let stopped = Arc::new(AtomicBool::new(false));
+    let stopping = stopped.clone();
+    let worker = thread::spawn(move || {
+        while !stopping.load(Ordering::Relaxed) {
+            let event = match event::poll(Duration::from_millis(20)) {
+                Ok(false) => continue,
+                Ok(true) if stopping.load(Ordering::Relaxed) => return,
+                Ok(true) => event::read(),
+                Err(error) => Err(error),
+            };
             let failed = event.is_err();
             if sender.send(event).is_err() || failed {
                 return;
             }
         }
     });
-    receiver
+    Input {
+        events: receiver,
+        stopped,
+        worker: Some(worker),
+    }
 }
