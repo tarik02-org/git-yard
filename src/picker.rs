@@ -6,21 +6,16 @@ use std::io::{self, Stderr};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use crossbeam_channel::{Receiver, select, unbounded};
+use anyhow::{Context, Result};
+use crossbeam_channel::{Receiver, select};
 use ratatui::Frame;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::crossterm::event::{
-    self, DisableMouseCapture, EnableMouseCapture, Event as TermEvent, KeyCode, KeyEvent,
-    KeyEventKind, KeyModifiers, MouseButton, MouseEvent, MouseEventKind,
-};
-use ratatui::crossterm::execute;
-use ratatui::crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseButton, MouseEvent,
+    MouseEventKind,
 };
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style, Stylize};
@@ -88,10 +83,10 @@ pub fn run(
     let (engine, events) = Engine::start(config.clone());
     let mut app = App::new(config.clone(), engine, &mut cache, query);
 
-    let input = spawn_input();
-    let mut terminal = enter()?;
-    let choice = app.run_loop(&mut terminal, &input, &events);
-    leave();
+    let mut session = crate::terminal::stderr()?;
+    let input = crate::terminal::input();
+    let choice = app.run_loop(&mut session.terminal, &input, &events);
+    drop(session);
     let choice = choice?;
 
     cache.listings = app.listings.into_values().collect();
@@ -162,34 +157,6 @@ fn save(cache: &mut PickCache, paths: &Paths, now: Timestamp) {
 }
 
 type Term = Terminal<CrosstermBackend<Stderr>>;
-
-fn enter() -> Result<Term> {
-    enable_raw_mode()?;
-    execute!(io::stderr(), EnterAlternateScreen, EnableMouseCapture)?;
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        leave();
-        previous(info);
-    }));
-    Ok(Terminal::new(CrosstermBackend::new(io::stderr()))?)
-}
-
-fn leave() {
-    let _ = execute!(io::stderr(), DisableMouseCapture, LeaveAlternateScreen);
-    let _ = disable_raw_mode();
-}
-
-fn spawn_input() -> Receiver<TermEvent> {
-    let (sender, receiver) = unbounded();
-    thread::spawn(move || {
-        while let Ok(event) = event::read() {
-            if sender.send(event).is_err() {
-                return;
-            }
-        }
-    });
-    receiver
-}
 
 struct App {
     config: Arc<Config>,
@@ -271,7 +238,7 @@ impl App {
     fn run_loop(
         &mut self,
         terminal: &mut Term,
-        input: &Receiver<TermEvent>,
+        input: &Receiver<io::Result<TermEvent>>,
         events: &Receiver<Event>,
     ) -> Result<Option<Choice>> {
         let mut dirty = true;
@@ -302,13 +269,15 @@ impl App {
             select! {
                 recv(input) -> input => {
                     self.settle();
-                    match input {
-                        Ok(TermEvent::Key(key)) if key.kind == KeyEventKind::Press => {
+                    let event = input.context("terminal input disconnected")?
+                        .context("reading terminal input")?;
+                    match event {
+                        TermEvent::Key(key) if key.kind == KeyEventKind::Press => {
                             if let Some(outcome) = self.on_key(key) {
                                 return Ok(outcome);
                             }
                         }
-                        Ok(TermEvent::Mouse(mouse)) => {
+                        TermEvent::Mouse(mouse) => {
                             if let Some(choice) = self.on_mouse(mouse) {
                                 return Ok(Some(choice));
                             }
@@ -318,7 +287,7 @@ impl App {
                     dirty = true;
                 }
                 recv(events) -> event => {
-                    let Ok(event) = event else { continue };
+                    let event = event.context("picker workers disconnected")?;
                     self.on_event(event);
                     for event in events.try_iter().take(5000) {
                         self.on_event(event);
@@ -523,11 +492,15 @@ impl App {
             match key.code {
                 KeyCode::Esc => return None,
                 KeyCode::Enter => {
-                    let name = name.value().trim().to_owned();
-                    if name.is_empty() {
-                        return None;
+                    let branch = name.value().trim().to_owned();
+                    if branch.is_empty() {
+                        self.say("enter a branch name");
+                    } else if let Some(choice) = self.choose(Action::Create { name: branch }, false)
+                    {
+                        return Some(Some(choice));
                     }
-                    return self.choose(Action::Create { name }, false).map(Some);
+                    self.prompt = Some(name);
+                    return None;
                 }
                 KeyCode::Char(c) if c.is_whitespace() => {}
                 _ => {

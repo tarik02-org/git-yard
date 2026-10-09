@@ -4,18 +4,14 @@
 
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::thread;
 use std::time::{Duration, Instant};
 
-use anyhow::Result;
-use crossbeam_channel::{Receiver, select, tick, unbounded};
+use anyhow::{Context, Result};
+use crossbeam_channel::{select, tick};
 use ratatui::crossterm::event::{
-    self, Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
+    Event as TermEvent, KeyCode, KeyEvent, KeyEventKind, KeyModifiers,
 };
-use ratatui::crossterm::event::{
-    DisableMouseCapture, EnableMouseCapture, MouseButton, MouseEvent, MouseEventKind,
-};
-use ratatui::crossterm::execute;
+use ratatui::crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Rect;
 use tui_input::Input;
 use tui_input::backend::crossterm::EventHandler;
@@ -55,10 +51,9 @@ pub fn run(
     let mut app = App::new(Model::new(config), engine);
     app.notices = interrupted.iter().map(Interrupted::describe).collect();
 
-    let input = spawn_input();
+    let mut session = crate::terminal::stdout()?;
+    let input = crate::terminal::input();
     let ticker = tick(Duration::from_secs(1));
-    let mut terminal = ratatui::init();
-    enable_mouse()?;
     let result = (|| -> Result<()> {
         let mut dirty = true;
         let mut last_draw = Instant::now() - FRAME;
@@ -66,7 +61,7 @@ pub fn run(
             if dirty && last_draw.elapsed() >= FRAME {
                 app.model.settle();
                 app.sync_wanted();
-                terminal.draw(|frame| app.draw(frame))?;
+                session.terminal.draw(|frame| app.draw(frame))?;
                 last_draw = Instant::now();
                 dirty = false;
             }
@@ -79,9 +74,11 @@ pub fn run(
                 recv(input) -> input => {
                     // Key handlers read the order, so pending events are settled first.
                     app.model.settle();
-                    match input {
-                        Ok(TermEvent::Key(key)) if key.kind == KeyEventKind::Press && app.on_key(key) => break,
-                        Ok(TermEvent::Mouse(mouse)) => app.on_mouse(mouse),
+                    let event = input.context("terminal input disconnected")?
+                        .context("reading terminal input")?;
+                    match event {
+                        TermEvent::Key(key) if key.kind == KeyEventKind::Press && app.on_key(key) => break,
+                        TermEvent::Mouse(mouse) => app.on_mouse(mouse),
                         _ => {}
                     }
                     dirty = true;
@@ -106,8 +103,7 @@ pub fn run(
         }
         Ok(())
     })();
-    disable_mouse();
-    ratatui::restore();
+    drop(session);
 
     let fresh = app
         .model
@@ -120,33 +116,6 @@ pub fn run(
     }
     app.engine.shutdown();
     result
-}
-
-fn enable_mouse() -> Result<()> {
-    execute!(std::io::stdout(), EnableMouseCapture)?;
-    // ratatui's panic hook restores the terminal but not mouse reporting.
-    let previous = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        disable_mouse();
-        previous(info);
-    }));
-    Ok(())
-}
-
-fn disable_mouse() {
-    let _ = execute!(std::io::stdout(), DisableMouseCapture);
-}
-
-fn spawn_input() -> Receiver<TermEvent> {
-    let (sender, receiver) = unbounded();
-    thread::spawn(move || {
-        while let Ok(event) = event::read() {
-            if sender.send(event).is_err() {
-                return;
-            }
-        }
-    });
-    receiver
 }
 
 #[derive(Clone, Copy)]
@@ -313,6 +282,11 @@ impl App {
     /// Returns true when the application should exit immediately.
     fn on_key(&mut self, key: KeyEvent) -> bool {
         self.notices.clear();
+        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
+        if ctrl && key.code == KeyCode::Char('c') {
+            self.delete_now_armed = false;
+            return self.request_quit(true);
+        }
         if self.editing_filter {
             match key.code {
                 KeyCode::Esc => {
@@ -328,9 +302,7 @@ impl App {
         }
 
         let armed = std::mem::take(&mut self.delete_now_armed);
-        let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         match key.code {
-            KeyCode::Char('c') if ctrl => return self.request_quit(true),
             KeyCode::Char('q') => return self.request_quit(false),
             KeyCode::Char('j') | KeyCode::Down => self.move_focus(1),
             KeyCode::Char('k') | KeyCode::Up => self.move_focus(-1),

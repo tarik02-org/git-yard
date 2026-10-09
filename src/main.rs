@@ -19,6 +19,7 @@ use git_yard::state::Model;
 use git_yard::store::{Cache, Journal, Paths};
 
 mod picker;
+mod terminal;
 mod text_input;
 mod tui;
 

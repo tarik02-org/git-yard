@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use serde::{Deserialize, Serialize};
 
 use super::forge::{self, Forge, Request};
@@ -37,6 +37,14 @@ pub fn validate(
     request: Option<&(Forge, Request)>,
     action: &Action,
 ) -> Result<()> {
+    if let Action::Create { name } = action {
+        ensure!(
+            !name.starts_with('-')
+                && name != "HEAD"
+                && git2::Reference::is_valid_name(&format!("refs/heads/{name}")),
+            "invalid branch name: {name}"
+        );
+    }
     match (target, action) {
         (Target::Worktree { branch: None, .. }, Action::Create { .. }) => {
             bail!("a detached worktree cannot be a base")
