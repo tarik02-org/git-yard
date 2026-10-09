@@ -1,0 +1,31 @@
+[package]
+name = "git-yard"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.90"
+description = "Pick and clean up Git worktrees across projects"
+license = "MIT"
+repository = "https://github.com/tarik02-org/git-yard"
+readme = "README.md"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+crossbeam-channel = "0.5"
+dirs = "6"
+git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }
+gix = { version = "0.88.0", default-features = false, features = ["status", "parallel", "sha1", "max-performance-safe"] }
+jwalk = "0.9.0"
+libc = "0.2.190"
+mimalloc = "0.1.52"
+nucleo-matcher = "0.3.1"
+ratatui = "0.29"
+rayon = "1.12.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+toml = "0.9"
+tempfile = "3"
+
+[profile.release]
+lto = "thin"

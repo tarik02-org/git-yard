@@ -1,0 +1,47 @@
+name: Nightly release
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [master]
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: nightly-release
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    if: github.repository == 'tarik02-org/git-yard' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/download-artifact@70fc10c6e5e1ce46ad2ea6f2b72d43f7d47b13c3 # v8.0.0
+        with:
+          pattern: git-yard-*
+          path: artifacts
+          merge-multiple: true
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+      - name: Verify checksums
+        run: cd artifacts && sha256sum --check ./*.sha256
+      - id: version
+        env:
+          RELEASE_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: echo "tag=nightly-$(date -u +%Y%m%d)-${RELEASE_SHA:0:12}" >> "$GITHUB_OUTPUT"
+      - uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: ${{ steps.version.outputs.tag }}
+          target_commitish: ${{ github.event.workflow_run.head_sha }}
+          name: git-yard ${{ steps.version.outputs.tag }}
+          prerelease: true
+          make_latest: false
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: |
+            artifacts/*.tar.gz
+            artifacts/*.sha256
