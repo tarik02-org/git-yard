@@ -41,6 +41,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Generate shell completions.
+    Completions {
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Open the ranked worktree cleanup TUI.
     Gc {
         /// Directories to scan instead of the configured roots or the current
@@ -110,11 +115,19 @@ fn run() -> Result<ExitCode> {
         println!();
         return Ok(ExitCode::SUCCESS);
     };
-    let cwd = std::env::current_dir()?;
-    let paths = Paths::default_locations()?;
-
     match command {
+        Command::Completions { shell } => {
+            clap_complete::generate(
+                shell,
+                &mut Cli::command(),
+                "git-yard",
+                &mut std::io::stdout(),
+            );
+            Ok(ExitCode::SUCCESS)
+        }
         Command::Gc { paths: scan_paths } => {
+            let cwd = std::env::current_dir()?;
+            let paths = Paths::default_locations()?;
             let config = Config::load(&cwd, cli.config.as_deref(), &scan_paths)?;
             let journal = Arc::new(Journal::open(&paths.journal_file)?);
             let interrupted = journal.reconcile()?;
@@ -128,6 +141,8 @@ fn run() -> Result<ExitCode> {
             no_measure,
             timings,
         } => {
+            let cwd = std::env::current_dir()?;
+            let paths = Paths::default_locations()?;
             let config = Config::load(&cwd, cli.config.as_deref(), &list_paths)?;
             list(config, &paths, cli.no_cache, json, !no_measure, timings)
         }
@@ -136,6 +151,8 @@ fn run() -> Result<ExitCode> {
             allow_dirty,
             json,
         } => {
+            let cwd = std::env::current_dir()?;
+            let paths = Paths::default_locations()?;
             let config = Config::load(&cwd, cli.config.as_deref(), &[])?;
             let journal = Journal::open(&paths.journal_file)?;
             remove_ids(&config, &journal, &ids, allow_dirty, json)
@@ -146,6 +163,8 @@ fn run() -> Result<ExitCode> {
             json,
             command,
         } => {
+            let cwd = std::env::current_dir()?;
+            let paths = Paths::default_locations()?;
             let config = Config::load(&cwd, cli.config.as_deref(), &[])?;
             let handoff = if json {
                 None
@@ -159,6 +178,7 @@ fn run() -> Result<ExitCode> {
             picker::run(Arc::new(config), &paths, query.join(" "), handoff)
         }
         Command::Journal { json } => {
+            let paths = Paths::default_locations()?;
             let journal = Journal::open(&paths.journal_file)?;
             let interrupted = journal.reconcile()?;
             if json {

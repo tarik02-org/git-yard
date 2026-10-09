@@ -11,6 +11,7 @@ readme = "README.md"
 [dependencies]
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
+clap_complete = "4"
 crossbeam-channel = "0.5"
 dirs = "6"
 git2 = { version = "0.20", default-features = false, features = ["vendored-libgit2"] }

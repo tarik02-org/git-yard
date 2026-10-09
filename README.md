@@ -10,6 +10,18 @@ With Nix: `nix profile add github:tarik02-org/git-yard`.
 
 From source: `cargo install --git https://github.com/tarik02-org/git-yard --locked`.
 
+Home Manager, with `inputs.git-yard.url = "github:tarik02-org/git-yard"`:
+
+```nix
+imports = [ inputs.git-yard.homeManagerModules.default ];
+programs.git-yard = {
+  enable = true;
+  settings.roots = [ "~/work" ];
+};
+```
+
+The module installs completions and adds `gyp` to enabled Bash/Zsh/Fish shells to pick and change directory. Disable individual helpers with `enableBashIntegration`, `enableZshIntegration`, or `enableFishIntegration`.
+
 ## Usage
 
 ```sh
@@ -22,17 +34,19 @@ git-yard list --json ~/work    # inspect candidates
 git-yard                      # help
 ```
 
-To change directory from your shell:
+To change directory from Bash/Zsh:
 
 ```sh
-p() { local dir; dir="$(git-yard pick "$@")" && cd "$dir"; }
+gyp() { local dir; dir="$(git-yard pick "$@")" && [ -n "$dir" ] && builtin cd -- "$dir"; }
 ```
+
+Generate completions with `git-yard completions bash` (also `zsh`, `fish`, `elvish`, `powershell`). Nix installs Bash/Zsh/Fish completions automatically.
 
 Cleanup: arrows or `j`/`k` move, `J`/`K` move the selection cutoff, Space toggles a row, `D` deletes checked rows, `xx` deletes the focused row, Enter shows details, `q` quits. Deletion is permanent; branches are kept. Main, locked and unsafe worktrees are blocked, and every removal is revalidated.
 
 Picker: type to search, arrows move, Enter opens, Tab scopes to a project, Ctrl-O creates a branch, Esc clears or quits. It uses Worktrunk when installed, otherwise Git. `gh`/`glab` enable PR/MR discovery; visible projects refresh in the background.
 
-Optional `~/.config/git-yard/config.toml`, or `.git-yard.toml` found upward from the current directory:
+Optional `~/.config/git-yard/config.toml` (`~/Library/Application Support/git-yard/config.toml` on macOS), or `.git-yard.toml` found upward from the current directory:
 
 ```toml
 roots = ["~/work"]

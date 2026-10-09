@@ -25,7 +25,10 @@
               version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
               src = self;
               cargoLock.lockFile = ./Cargo.lock;
-              nativeBuildInputs = [ pkgs.buildPackages.pkg-config ];
+              nativeBuildInputs = [
+                pkgs.buildPackages.pkg-config
+                pkgs.buildPackages.installShellFiles
+              ];
               buildInputs = [ pkgs.libgit2 ];
               # Link against the Nix libgit2 instead of the crate's vendored copy.
               env.LIBGIT2_NO_VENDOR = "1";
@@ -34,6 +37,12 @@
                 pkgs.stdenv.hostPlatform.isStatic && pkgs.stdenv.hostPlatform.isAarch64
               ) "-C link-arg=-lgcc";
               nativeCheckInputs = [ pkgs.buildPackages.git ];
+              postInstall = nixpkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
+                installShellCompletion --cmd git-yard \
+                  --bash <($out/bin/git-yard completions bash) \
+                  --zsh <($out/bin/git-yard completions zsh) \
+                  --fish <($out/bin/git-yard completions fish)
+              '';
               meta.mainProgram = "git-yard";
             };
         in
@@ -46,6 +55,9 @@
           static = gitYard pkgs.pkgsStatic;
         }
       );
+
+      homeManagerModules.default = import ./nix/home-manager.nix self;
+      homeManagerModules.git-yard = self.homeManagerModules.default;
 
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
