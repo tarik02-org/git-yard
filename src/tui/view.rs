@@ -537,9 +537,8 @@ impl App {
         if hidden > 0 {
             status.push(Span::from(format!(" · {hidden} selected hidden by filter")).yellow());
         }
-        if self.editing_filter || !self.filter.is_empty() {
-            let cursor = if self.editing_filter { "▏" } else { "" };
-            status.push(Span::from(format!(" · filter: {}{cursor}", self.filter)).cyan());
+        if !self.editing_filter && !self.filter.value().is_empty() {
+            status.push(Span::from(format!(" · filter: {}", self.filter.value())).cyan());
         }
         if let Some((at, message)) = &self.message
             && at.elapsed() < MESSAGE_TTL
@@ -552,10 +551,19 @@ impl App {
         } else {
             "space check · J/K cutoff · D delete selected · xx delete now · / filter · ⏎ details · ? keys · q quit"
         };
-        frame.render_widget(
-            Paragraph::new(vec![Line::from(status), Line::from(keys).dim()]),
-            area,
-        );
+        let [status_area, keys_area] =
+            Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);
+        frame.render_widget(Paragraph::new(Line::from(status)), status_area);
+        if self.editing_filter {
+            crate::text_input::draw(
+                frame,
+                keys_area,
+                Line::from("filter: ").cyan(),
+                &self.filter,
+            );
+        } else {
+            frame.render_widget(Paragraph::new(Line::from(keys).dim()), keys_area);
+        }
     }
 }
 

@@ -27,6 +27,8 @@ use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Cell, Paragraph, Row as TableRow, Table};
 use serde::Serialize;
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 use unicode_width::UnicodeWidthStr;
 
 use git_yard::config::Config;
@@ -203,10 +205,10 @@ struct App {
     /// Index into `results`.
     cursor: usize,
     offset: usize,
-    query: String,
+    query: Input,
     scope: Option<PathBuf>,
     /// Name being typed for a new branch.
-    prompt: Option<String>,
+    prompt: Option<Input>,
     rerank: bool,
     /// Target to keep the cursor on across a re-rank. `results` is cleared
     /// whenever `items` changes, since it holds indices into it.
@@ -244,7 +246,7 @@ impl App {
             cursor: 0,
             offset: 0,
             refresh_at: (!query.is_empty()).then(Instant::now),
-            query,
+            query: Input::new(query),
             scope: None,
             prompt: None,
             rerank: true,
@@ -414,7 +416,7 @@ impl App {
         let selected = self.anchor.take();
         self.results = self.ranker.rank(
             &self.items,
-            &self.query,
+            self.query.value(),
             self.scope.as_deref(),
             &self.picks,
             self.now,
@@ -444,7 +446,7 @@ impl App {
                 .find(|item| &item.project.common_dir == scope)
                 .map(|item| vec![item.project.clone()])
                 .unwrap_or_default(),
-            None if self.query.trim().is_empty() => Vec::new(),
+            None if self.query.value().trim().is_empty() => Vec::new(),
             None => {
                 let mut seen = HashSet::new();
                 self.results
@@ -480,7 +482,7 @@ impl App {
 
     fn set_scope(&mut self, scope: Option<PathBuf>) {
         self.scope = scope;
-        self.query.clear();
+        self.query.reset();
         self.query_changed();
     }
 
@@ -521,17 +523,16 @@ impl App {
             match key.code {
                 KeyCode::Esc => return None,
                 KeyCode::Enter => {
-                    let name = name.trim().to_owned();
+                    let name = name.value().trim().to_owned();
                     if name.is_empty() {
                         return None;
                     }
                     return self.choose(Action::Create { name }, false).map(Some);
                 }
-                KeyCode::Backspace => {
-                    name.pop();
+                KeyCode::Char(c) if c.is_whitespace() => {}
+                _ => {
+                    name.handle_event(&TermEvent::Key(key));
                 }
-                KeyCode::Char(c) if !ctrl && !alt && !c.is_whitespace() => name.push(c),
-                _ => {}
             }
             self.prompt = Some(name);
             return None;
@@ -540,8 +541,8 @@ impl App {
         match key.code {
             KeyCode::Enter => return self.choose(Action::Open, alt).map(Some),
             KeyCode::Esc => {
-                if !self.query.is_empty() {
-                    self.query.clear();
+                if !self.query.value().is_empty() {
+                    self.query.reset();
                     self.query_changed();
                 } else if self.scope.is_some() {
                     self.set_scope(None);
@@ -568,31 +569,21 @@ impl App {
                 Some(item) if matches!(item.target, Target::Request { .. }) => {
                     self.say("open the request first, then branch off its worktree");
                 }
-                Some(_) => self.prompt = Some(String::new()),
+                Some(_) => self.prompt = Some(Input::default()),
                 None => {}
             },
-            KeyCode::Char('u') if ctrl => {
-                self.query.clear();
-                self.query_changed();
+            KeyCode::Backspace if self.query.value().is_empty() && self.scope.is_some() => {
+                self.set_scope(None);
             }
-            KeyCode::Char('w') if ctrl => {
-                let trimmed = self.query.trim_end();
-                let cut = trimmed.rfind(' ').map_or(0, |index| index + 1);
-                self.query.truncate(cut);
-                self.query_changed();
-            }
-            KeyCode::Backspace => {
-                if self.query.pop().is_some() {
+            _ => {
+                if self
+                    .query
+                    .handle_event(&TermEvent::Key(key))
+                    .is_some_and(|change| change.value)
+                {
                     self.query_changed();
-                } else if self.scope.is_some() {
-                    self.set_scope(None);
                 }
             }
-            KeyCode::Char(c) if !ctrl && !alt => {
-                self.query.push(c);
-                self.query_changed();
-            }
-            _ => {}
         }
         None
     }
@@ -639,7 +630,7 @@ impl App {
         self.list_area = list;
 
         frame.render_widget(Paragraph::new(self.header_line()), header);
-        frame.render_widget(Paragraph::new(self.input_line()), input);
+        self.draw_input(frame, input);
         self.draw_list(frame, list);
         frame.render_widget(Paragraph::new(self.footer_line()), footer);
     }
@@ -664,20 +655,19 @@ impl App {
         Line::from(spans)
     }
 
-    fn input_line(&self) -> Line<'static> {
-        let mut spans = Vec::new();
+    fn draw_input(&self, frame: &mut Frame, area: Rect) {
         if let Some(name) = &self.prompt {
             let base = self.selected().map(Item::branch_text).unwrap_or_default();
-            spans.push(Span::from(format!("new branch from {base}: ")).yellow());
-            spans.push(Span::from(format!("{name}▏")));
-            return Line::from(spans);
+            let prefix = Line::from(format!("new branch from {base}: ")).yellow();
+            crate::text_input::draw(frame, area, prefix, name);
+        } else {
+            let mut spans = Vec::new();
+            if let Some(scope) = &self.scope {
+                spans.push(Span::from(format!("[{}] ", self.label(scope))).cyan());
+            }
+            spans.push(Span::from("> ").bold());
+            crate::text_input::draw(frame, area, Line::from(spans), &self.query);
         }
-        if let Some(scope) = &self.scope {
-            spans.push(Span::from(format!("[{}] ", self.label(scope))).cyan());
-        }
-        spans.push(Span::from("> ").bold());
-        spans.push(Span::from(format!("{}▏", self.query)));
-        Line::from(spans)
     }
 
     fn footer_line(&self) -> Line<'static> {

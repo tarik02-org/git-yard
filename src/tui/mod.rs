@@ -17,6 +17,8 @@ use ratatui::crossterm::event::{
 };
 use ratatui::crossterm::execute;
 use ratatui::layout::Rect;
+use tui_input::Input;
+use tui_input::backend::crossterm::EventHandler;
 
 use git_yard::config::Config;
 use git_yard::discovery::display_path;
@@ -168,7 +170,7 @@ struct App {
     model: Model,
     engine: Engine,
     focus: Option<CandidateId>,
-    filter: String,
+    filter: Input,
     editing_filter: bool,
     details: bool,
     help: bool,
@@ -199,7 +201,7 @@ impl App {
             model,
             engine,
             focus: None,
-            filter: String::new(),
+            filter: Input::default(),
             editing_filter: false,
             details: false,
             help: false,
@@ -280,6 +282,7 @@ impl App {
     fn visible(&self) -> Vec<CandidateId> {
         let terms: Vec<String> = self
             .filter
+            .value()
             .to_lowercase()
             .split_whitespace()
             .map(str::to_owned)
@@ -313,15 +316,13 @@ impl App {
         if self.editing_filter {
             match key.code {
                 KeyCode::Esc => {
-                    self.filter.clear();
+                    self.filter.reset();
                     self.editing_filter = false;
                 }
                 KeyCode::Enter => self.editing_filter = false,
-                KeyCode::Backspace => {
-                    self.filter.pop();
+                _ => {
+                    self.filter.handle_event(&TermEvent::Key(key));
                 }
-                KeyCode::Char(c) => self.filter.push(c),
-                _ => {}
             }
             return false;
         }
@@ -348,7 +349,7 @@ impl App {
             KeyCode::Char('x') => self.arm_delete_now(),
             KeyCode::Char('c') => self.cancel_focused(),
             KeyCode::Char('/') => self.editing_filter = true,
-            KeyCode::Esc => self.filter.clear(),
+            KeyCode::Esc => self.filter.reset(),
             KeyCode::Char('r') => {
                 self.model.selection.rerank(&self.model.rows);
                 self.say("reranked; review the selection before submitting");
@@ -433,7 +434,7 @@ impl App {
     }
 
     fn move_cutoff(&mut self, delta: isize) {
-        if !self.filter.is_empty() {
+        if !self.filter.value().is_empty() {
             self.say("clear the filter (esc) to move the cutoff");
             return;
         }
@@ -456,7 +457,7 @@ impl App {
     }
 
     fn cutoff_to_focus(&mut self) {
-        if !self.filter.is_empty() {
+        if !self.filter.value().is_empty() {
             self.say("clear the filter (esc) to move the cutoff");
             return;
         }
@@ -592,7 +593,7 @@ impl App {
                 match self.table_rows[index].clone() {
                     Slot::Top => self.focus = None,
                     Slot::Cutoff => {
-                        if self.filter.is_empty() {
+                        if self.filter.value().is_empty() {
                             self.dragging_cutoff = true;
                         } else {
                             self.say("clear the filter (esc) to move the cutoff");

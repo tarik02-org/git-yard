@@ -44,7 +44,7 @@ Generate completions with `git-yard completions bash` (also `zsh`, `fish`, `elvi
 
 Cleanup: arrows or `j`/`k` move, `J`/`K` move the selection cutoff, Space toggles a row, `D` deletes checked rows, `xx` deletes the focused row, Enter shows details, `q` quits. Deletion is permanent; branches are kept. Main, locked and unsafe worktrees are blocked, and every removal is revalidated.
 
-Picker: type to search, arrows move, Enter opens, Tab scopes to a project, Ctrl-O creates a branch, Esc clears or quits. It uses Worktrunk when installed, otherwise Git. `gh`/`glab` enable PR/MR discovery; visible projects refresh in the background.
+Picker: type to search, Up/Down select, Left/Right edit, Enter opens, Tab scopes to a project, Ctrl-O creates a branch, Esc clears or quits. It uses Worktrunk when installed, otherwise Git. `gh`/`glab` enable PR/MR discovery; visible projects refresh in the background.
 
 Optional `~/.config/git-yard/config.toml` (`~/Library/Application Support/git-yard/config.toml` on macOS), or `.git-yard.toml` found upward from the current directory:
 
