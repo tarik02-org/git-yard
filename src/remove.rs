@@ -239,7 +239,10 @@ fn validate(repo: &Repository, name: &str, request: &Request) -> Result<Validate
             worktree.path().display()
         )));
     }
-    if let Ok(WorktreeLockStatus::Locked(reason)) = worktree.is_locked() {
+    if let WorktreeLockStatus::Locked(reason) = worktree
+        .is_locked()
+        .map_err(|error| blocked(format!("checking lock: {error}")))?
+    {
         return Err(blocked(match reason {
             Some(reason) => format!("locked: {reason}"),
             None => "locked".into(),
@@ -265,6 +268,9 @@ fn validate(repo: &Repository, name: &str, request: &Request) -> Result<Validate
             return Err(blocked("directory contains the repository storage".into()));
         }
     }
+
+    assess::ensure_removal_storage(&request.gitdir, &request.path)
+        .map_err(|error| blocked(format!("checking repository storage: {error:#}")))?;
 
     let head = assess::read_head(repo, &request.gitdir, Kind::LinkedWorktree)
         .map_err(|error| blocked(format!("reading HEAD: {error:#}")))?;

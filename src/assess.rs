@@ -47,6 +47,9 @@ pub fn assess(seed: &Seed, cache: &mut RepoCache) -> Result<GitFacts> {
         let status = inspect_status.then(|| scope.spawn(|| dirty(&seed.path)));
 
         let repo = cache.get(&seed.id.repo)?;
+        if seed.kind == Kind::LinkedWorktree {
+            ensure_removal_storage(&seed.gitdir, &seed.path)?;
+        }
         let head = read_head(repo, &seed.gitdir, seed.kind)?;
         let tip = head.oid().map(Oid::from_str).transpose()?;
         let commit = tip.map(|oid| repo.find_commit(oid)).transpose()?;
@@ -264,11 +267,12 @@ pub fn dirty(worktree: &Path) -> Result<Dirty> {
     }
     if !evidence.is_empty() {
         evidence.sort();
+        let ignore = Repository::open(worktree)?;
         let mut hash = gix::hash::hasher(gix::hash::Kind::Sha1);
         for (path, detail) in evidence {
             hash_field(&mut hash, path.as_os_str().as_bytes());
             hash_field(&mut hash, detail.as_bytes());
-            fingerprint_path(&worktree.join(path), &mut hash)?;
+            fingerprint_path(worktree, &ignore, &worktree.join(path), &mut hash)?;
         }
         result
             .fingerprint
@@ -282,7 +286,12 @@ fn hash_field(hash: &mut gix::hash::Hasher, bytes: &[u8]) {
     hash.update(bytes);
 }
 
-fn fingerprint_path(path: &Path, hash: &mut gix::hash::Hasher) -> Result<()> {
+fn fingerprint_path(
+    worktree: &Path,
+    ignore: &Repository,
+    path: &Path,
+    hash: &mut gix::hash::Hasher,
+) -> Result<()> {
     let meta = match fs::symlink_metadata(path) {
         Ok(meta) => meta,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -314,12 +323,60 @@ fn fingerprint_path(path: &Path, hash: &mut gix::hash::Hasher) -> Result<()> {
             let mut children = fs::read_dir(path)?.collect::<std::io::Result<Vec<_>>>()?;
             children.sort_by_key(|entry| entry.file_name());
             for child in children {
+                if ignore.status_should_ignore(child.path().strip_prefix(worktree)?)? {
+                    continue;
+                }
                 hash_field(hash, child.file_name().as_bytes());
-                fingerprint_path(&child.path(), hash)?;
+                fingerprint_path(worktree, ignore, &child.path(), hash)?;
             }
         }
     } else {
         anyhow::bail!("cannot safely fingerprint special file {}", path.display());
+    }
+    Ok(())
+}
+
+/// Pruning a linked registration also destroys its private submodule
+/// repositories, including commits that may exist nowhere else.
+pub fn ensure_removal_storage(gitdir: &Path, path: &Path) -> Result<()> {
+    anyhow::ensure!(
+        !gitdir.join("modules").try_exists()?,
+        "worktree registration contains private submodule storage; left untouched"
+    );
+    let root = match fs::symlink_metadata(path) {
+        Ok(meta) if meta.is_dir() => meta,
+        Ok(_) => return Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut directories = vec![path.to_path_buf()];
+    while let Some(directory) = directories.pop() {
+        if directory != path {
+            let bare = directory.join("HEAD").is_file()
+                && directory.join("objects").is_dir()
+                && directory.join("refs").is_dir();
+            anyhow::ensure!(
+                !directory.join(".git").try_exists()? && !bare,
+                "directory contains a nested repository or worktree: {}; left untouched",
+                directory.display()
+            );
+        }
+        for child in fs::read_dir(&directory)? {
+            let child = child?;
+            if child.file_name() == ".git" {
+                continue;
+            }
+            let meta = child.metadata()?;
+            if meta.is_dir() {
+                use std::os::unix::fs::MetadataExt;
+                anyhow::ensure!(
+                    meta.dev() == root.dev(),
+                    "directory contains a mounted filesystem: {}; left untouched",
+                    child.path().display()
+                );
+                directories.push(child.path());
+            }
+        }
     }
     Ok(())
 }
