@@ -39,16 +39,16 @@ jobs:
         run: nix develop --command cargo fmt --all -- --check
 
       - name: Run tests
-        run: nix develop --command cargo test --locked
+        run: nix develop --command cargo test --locked --workspace
 
       - name: Run clippy
-        run: nix develop --command cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: nix develop --command cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Build static binary
         run: nix build .#static
 
       - name: Package binary
-        run: bash scripts/package.sh result/bin/git-yard '${{ matrix.target }}'
+        run: nix develop --command cargo xtask package result/bin/git-yard '${{ matrix.target }}'
 
       - name: Upload package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
@@ -82,16 +82,16 @@ jobs:
         run: cargo fmt --all -- --check
 
       - name: Run tests
-        run: cargo test --locked
+        run: cargo test --locked --workspace
 
       - name: Run clippy
-        run: cargo clippy --locked --all-targets --all-features -- -D warnings
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
       - name: Build binary
         run: cargo build --locked --release --target aarch64-apple-darwin
 
       - name: Package binary
-        run: bash scripts/package.sh target/aarch64-apple-darwin/release/git-yard aarch64-apple-darwin
+        run: cargo xtask package target/aarch64-apple-darwin/release/git-yard aarch64-apple-darwin
 
       - name: Upload package
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0

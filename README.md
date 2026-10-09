@@ -8,7 +8,7 @@ Download a prebuilt archive from [Releases](https://github.com/tarik02-org/git-y
 
 With Nix: `nix profile add github:tarik02-org/git-yard`.
 
-From source: `cargo install --git https://github.com/tarik02-org/git-yard --locked`.
+From source: `cargo install git-yard --git https://github.com/tarik02-org/git-yard --locked`.
 
 Home Manager, with `inputs.git-yard.url = "github:tarik02-org/git-yard"`:
 
