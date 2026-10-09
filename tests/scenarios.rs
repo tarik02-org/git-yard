@@ -138,7 +138,7 @@ fn aliases_overlapping_roots_and_outside_worktrees_produce_one_row_each() {
     let f = Fixture::new();
     f.branch("feature", f.tip("main"));
     let outside = f.dir.path().join("elsewhere/feature");
-    f.worktree("feature", "feature", Some(outside.clone()));
+    let outside = f.worktree("feature", "feature", Some(outside));
     let alias = f.dir.path().join("alias");
     std::os::unix::fs::symlink(&f.root, &alias).unwrap();
 

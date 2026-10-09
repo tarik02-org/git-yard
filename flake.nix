@@ -29,6 +29,10 @@
               buildInputs = [ pkgs.libgit2 ];
               # Link against the Nix libgit2 instead of the crate's vendored copy.
               env.LIBGIT2_NO_VENDOR = "1";
+              # PCRE2's ARM64 JIT needs __clear_cache; Rust omits GCC's runtime.
+              env.RUSTFLAGS = nixpkgs.lib.optionalString (
+                pkgs.stdenv.hostPlatform.isStatic && pkgs.stdenv.hostPlatform.isAarch64
+              ) "-C link-arg=-lgcc";
               nativeCheckInputs = [ pkgs.buildPackages.git ];
               meta.mainProgram = "git-yard";
             };

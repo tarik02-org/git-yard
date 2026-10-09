@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, bail};
-use clap::{Parser, Subcommand};
+use clap::{CommandFactory, Parser, Subcommand};
 use serde::Serialize;
 
 use git_yard::config::Config;
@@ -27,15 +27,8 @@ mod tui;
 static ALLOCATOR: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 #[derive(Parser)]
-#[command(
-    version,
-    about = "Pick and clean up Git worktrees across projects",
-    args_conflicts_with_subcommands = true
-)]
+#[command(version, about = "Pick and clean up Git worktrees across projects")]
 struct Cli {
-    /// Directories to scan instead of the configured roots or the current
-    /// directory.
-    paths: Vec<PathBuf>,
     /// Config file to use instead of the nearest .git-yard.toml.
     #[arg(long, global = true)]
     config: Option<PathBuf>,
@@ -48,6 +41,12 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Open the ranked worktree cleanup TUI.
+    Gc {
+        /// Directories to scan instead of the configured roots or the current
+        /// directory.
+        paths: Vec<PathBuf>,
+    },
     /// Scan to completion and print every candidate.
     List {
         paths: Vec<PathBuf>,
@@ -106,48 +105,48 @@ fn main() -> ExitCode {
 
 fn run() -> Result<ExitCode> {
     let cli = Cli::parse();
+    let Some(command) = cli.command else {
+        Cli::command().print_help()?;
+        println!();
+        return Ok(ExitCode::SUCCESS);
+    };
     let cwd = std::env::current_dir()?;
     let paths = Paths::default_locations()?;
 
-    match cli.command {
-        None => {
-            let config = Config::load(&cwd, cli.config.as_deref(), &cli.paths)?;
+    match command {
+        Command::Gc { paths: scan_paths } => {
+            let config = Config::load(&cwd, cli.config.as_deref(), &scan_paths)?;
             let journal = Arc::new(Journal::open(&paths.journal_file)?);
             let interrupted = journal.reconcile()?;
             let cached = load_cache(&paths, cli.no_cache);
             tui::run(Arc::new(config), journal, cached, interrupted, &paths)?;
             Ok(ExitCode::SUCCESS)
         }
-        Some(Command::List {
+        Command::List {
             paths: list_paths,
             json,
             no_measure,
             timings,
-        }) => {
-            let scan_paths = if list_paths.is_empty() {
-                cli.paths
-            } else {
-                list_paths
-            };
-            let config = Config::load(&cwd, cli.config.as_deref(), &scan_paths)?;
+        } => {
+            let config = Config::load(&cwd, cli.config.as_deref(), &list_paths)?;
             list(config, &paths, cli.no_cache, json, !no_measure, timings)
         }
-        Some(Command::Remove {
+        Command::Remove {
             ids,
             allow_dirty,
             json,
-        }) => {
-            let config = Config::load(&cwd, cli.config.as_deref(), &cli.paths)?;
+        } => {
+            let config = Config::load(&cwd, cli.config.as_deref(), &[])?;
             let journal = Journal::open(&paths.journal_file)?;
             remove_ids(&config, &journal, &ids, allow_dirty, json)
         }
-        Some(Command::Pick {
+        Command::Pick {
             query,
             tmux,
             json,
             command,
-        }) => {
-            let config = Config::load(&cwd, cli.config.as_deref(), &cli.paths)?;
+        } => {
+            let config = Config::load(&cwd, cli.config.as_deref(), &[])?;
             let handoff = if json {
                 None
             } else if tmux {
@@ -159,7 +158,7 @@ fn run() -> Result<ExitCode> {
             };
             picker::run(Arc::new(config), &paths, query.join(" "), handoff)
         }
-        Some(Command::Journal { json }) => {
+        Command::Journal { json } => {
             let journal = Journal::open(&paths.journal_file)?;
             let interrupted = journal.reconcile()?;
             if json {

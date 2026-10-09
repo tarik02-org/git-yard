@@ -27,7 +27,7 @@ impl Fixture {
     /// `<root>/ns/project` with one commit on `main`.
     pub fn new() -> Fixture {
         let dir = tempfile::tempdir().unwrap();
-        let root = dir.path().join("work");
+        let root = fs::canonicalize(dir.path()).unwrap().join("work");
         let main = root.join("ns/project");
         fs::create_dir_all(&main).unwrap();
         let repo = Repository::init(&main).unwrap();
@@ -100,7 +100,7 @@ impl Fixture {
         let mut options = WorktreeAddOptions::new();
         options.reference(Some(&reference));
         self.repo.worktree(name, &path, Some(&options)).unwrap();
-        path
+        fs::canonicalize(path).unwrap()
     }
 
     pub fn id(&self, name: &str) -> CandidateId {

@@ -13,13 +13,13 @@ From source: `cargo install --git https://github.com/tarik02-org/git-yard --lock
 ## Usage
 
 ```sh
-git-yard ~/work                # ranked cleanup TUI
+git-yard gc ~/work             # ranked cleanup TUI
 git-yard pick                  # search projects, worktrees, branches and PRs/MRs
 git-yard pick --json           # select without creating or switching worktrees
 git-yard pick --tmux           # session per project, window per worktree
 git-yard pick -- nvim {path}    # open with a command
 git-yard list --json ~/work    # inspect candidates
-git-yard --help
+git-yard                      # help
 ```
 
 To change directory from your shell:
