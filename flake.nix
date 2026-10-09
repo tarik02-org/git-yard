@@ -3,6 +3,13 @@
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
 
+  nixConfig = {
+    extra-substituters = [ "https://tarik02-git-yard.cachix.org" ];
+    extra-trusted-public-keys = [
+      "tarik02-git-yard.cachix.org-1:l60zkenz0GrTqa6XWMLzU4M72SG1O/2Y2YY479w435s="
+    ];
+  };
+
   outputs =
     { self, nixpkgs }:
     let
@@ -19,7 +26,10 @@
         pkgs:
         let
           gitYard =
-            pkgs:
+            {
+              pkgs,
+              portable ? false,
+            }:
             pkgs.rustPlatform.buildRustPackage {
               pname = "git-yard";
               version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
@@ -29,9 +39,11 @@
                 pkgs.buildPackages.pkg-config
                 pkgs.buildPackages.installShellFiles
               ];
-              buildInputs = [ pkgs.libgit2 ];
-              # Link against the Nix libgit2 instead of the crate's vendored copy.
-              env.LIBGIT2_NO_VENDOR = "1";
+              buildInputs = nixpkgs.lib.optionals (!portable) [ pkgs.libgit2 ];
+              # Portable macOS releases bundle libgit2 and zlib so only Apple's
+              # system libraries remain dynamically linked.
+              env.LIBGIT2_NO_VENDOR = if portable then "0" else "1";
+              env.LIBZ_SYS_STATIC = if portable then "1" else "0";
               # PCRE2's ARM64 JIT needs __clear_cache; Rust omits GCC's runtime.
               env.RUSTFLAGS = nixpkgs.lib.optionalString (
                 pkgs.stdenv.hostPlatform.isStatic && pkgs.stdenv.hostPlatform.isAarch64
@@ -47,12 +59,20 @@
             };
         in
         {
-          default = gitYard pkgs;
+          default = gitYard { inherit pkgs; };
+          release =
+            if pkgs.stdenv.hostPlatform.isLinux then
+              gitYard { pkgs = pkgs.pkgsStatic; }
+            else
+              gitYard {
+                inherit pkgs;
+                portable = true;
+              };
         }
         // nixpkgs.lib.optionalAttrs pkgs.stdenv.hostPlatform.isLinux {
           # Fully static musl binary that runs on any Linux of the same
           # architecture, without Nix.
-          static = gitYard pkgs.pkgsStatic;
+          static = self.packages.${pkgs.stdenv.hostPlatform.system}.release;
         }
       );
 

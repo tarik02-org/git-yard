@@ -68,12 +68,11 @@ fn validate_binary(binary: &[u8], target: Target) -> Result<()> {
                 binary.header.cputype == mach::constants::cputype::CPU_TYPE_ARM64,
                 "wrong CPU architecture"
             );
-            for library in binary.libs {
+            for library in binary.libs.into_iter().skip(1) {
                 ensure!(
-                    !["/nix/store", "/opt/homebrew", "/usr/local"]
-                        .iter()
-                        .any(|prefix| library.starts_with(prefix)),
-                    "binary depends on build-machine library: {library}"
+                    library.starts_with("/usr/lib/")
+                        || library.starts_with("/System/Library/Frameworks/"),
+                    "binary depends on a non-system library: {library}"
                 );
             }
         }

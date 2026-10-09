@@ -7,12 +7,15 @@ on:
         type: string
         required: false
         default: ''
+    secrets:
+      CACHIX_AUTH_TOKEN:
+        required: false
 
 permissions:
   contents: read
 
 jobs:
-  linux:
+  build:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
@@ -24,6 +27,8 @@ jobs:
             target: x86_64-unknown-linux-musl
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
+          - runner: macos-15
+            target: aarch64-apple-darwin
 
     steps:
       - name: Check out source
@@ -35,6 +40,13 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
+      - name: Configure Cachix
+        uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
+        with:
+          name: tarik02-git-yard
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name != 'push' || github.ref != 'refs/heads/master' }}
+
       - name: Check formatting
         run: nix develop --command cargo fmt --all -- --check
 
@@ -44,8 +56,8 @@ jobs:
       - name: Run clippy
         run: nix develop --command cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
-      - name: Build static binary
-        run: nix build .#static
+      - name: Build release binary
+        run: nix build .#release
 
       - name: Package binary
         run: nix develop --command cargo xtask package result/bin/git-yard '${{ matrix.target }}'
@@ -54,49 +66,6 @@ jobs:
         uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
         with:
           name: git-yard-${{ matrix.target }}
-          path: |
-            dist/*.tar.gz
-            dist/*.sha256
-          if-no-files-found: error
-          retention-days: 14
-
-  macos:
-    name: Build (aarch64-apple-darwin)
-    runs-on: macos-15
-    timeout-minutes: 45
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ inputs.ref }}
-          persist-credentials: false
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@e2a55d2ffb04f378e9626c28d38b36d230d1e12f # master
-        with:
-          toolchain: '1.95.0'
-          components: clippy,rustfmt
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Run tests
-        run: cargo test --locked --workspace
-
-      - name: Run clippy
-        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
-
-      - name: Build binary
-        run: cargo build --locked --release --target aarch64-apple-darwin
-
-      - name: Package binary
-        run: cargo xtask package target/aarch64-apple-darwin/release/git-yard aarch64-apple-darwin
-
-      - name: Upload package
-        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-        with:
-          name: git-yard-aarch64-apple-darwin
           path: |
             dist/*.tar.gz
             dist/*.sha256
