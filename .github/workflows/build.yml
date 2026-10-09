@@ -40,12 +40,19 @@ jobs:
       - name: Install Nix
         uses: cachix/install-nix-action@13d8dd58da0234aa297dedd986986ccb8e7f3e24 # v31.11.1
 
+      - name: Cache Nix build dependencies on GitHub
+        uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: nix-build-${{ matrix.target }}-${{ hashFiles('flake.lock', 'Cargo.lock') }}
+          restore-prefixes-first-match: nix-build-${{ matrix.target }}-
+          save: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+          gc-max-store-size: 4G
+
       - name: Configure Cachix
         uses: cachix/cachix-action@38b082610b782e7e93e209c35fd730d399dee866 # v17
         with:
           name: tarik02-git-yard
-          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
-          skipPush: ${{ github.event_name != 'push' || github.ref != 'refs/heads/master' }}
+          skipPush: true
 
       - name: Check formatting
         run: nix develop --command cargo fmt --all -- --check
@@ -71,3 +78,12 @@ jobs:
             dist/*.sha256
           if-no-files-found: error
           retention-days: 14
+
+      - name: Publish release package closure
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        shell: bash
+        env:
+          CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
+        run: |
+          test -n "$CACHIX_AUTH_TOKEN"
+          cachix push tarik02-git-yard result
