@@ -5,3 +5,4 @@ pub mod git;
 pub mod removal;
 pub mod scan;
 pub mod store;
+pub mod ui;
