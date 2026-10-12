@@ -17,10 +17,12 @@ fn c_path(path: &Path) -> io::Result<CString> {
 /// than falling back to a racy check-then-rename.
 pub fn rename_noreplace(from: &Path, to: &Path) -> io::Result<()> {
     let (from_c, to_c) = (c_path(from)?, c_path(to)?);
+    // The raw system call: musl, which static releases use, has no wrapper.
     #[cfg(target_os = "linux")]
     // SAFETY: both pointers are valid NUL-terminated strings for the call.
     let result = unsafe {
-        libc::renameat2(
+        libc::syscall(
+            libc::SYS_renameat2,
             libc::AT_FDCWD,
             from_c.as_ptr(),
             libc::AT_FDCWD,

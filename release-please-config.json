@@ -3,6 +3,7 @@
   "packages": {
     ".": {
       "release-type": "rust",
+      "release-as": "0.1.0",
       "package-name": "git-yard",
       "include-v-in-tag": true,
       "include-component-in-tag": false,

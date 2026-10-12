@@ -35,25 +35,13 @@
               version = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).package.version;
               src = self;
               cargoLock.lockFile = ./Cargo.lock;
-              nativeBuildInputs = [
-                pkgs.buildPackages.pkg-config
-                pkgs.buildPackages.installShellFiles
-              ];
-              buildInputs = nixpkgs.lib.optionals (!portable) [ pkgs.libgit2 ];
-              # Portable macOS releases bundle libgit2, zlib and libiconv so only Apple's
-              # system libraries remain dynamically linked.
-              env.LIBGIT2_NO_VENDOR = if portable then "0" else "1";
-              env.LIBZ_SYS_STATIC = if portable then "1" else "0";
-              # PCRE2's ARM64 JIT needs __clear_cache; Rust omits GCC's runtime.
-              env.RUSTFLAGS = nixpkgs.lib.concatStringsSep " " (
-                nixpkgs.lib.optional (
-                  pkgs.stdenv.hostPlatform.isStatic && pkgs.stdenv.hostPlatform.isAarch64
-                ) "-C link-arg=-lgcc"
-                # Search the static archive before Darwin's default dylib paths.
-                ++ nixpkgs.lib.optional (
-                  portable && pkgs.stdenv.hostPlatform.isDarwin
-                ) "-L native=${pkgs.pkgsStatic.libiconv.dev}/lib"
-              );
+              nativeBuildInputs = [ pkgs.buildPackages.installShellFiles ];
+              # The libc crate links iconv on Apple platforms. Portable macOS
+              # releases take the static archive, searched before Darwin's
+              # default dylib paths, so only system libraries stay dynamic.
+              env.RUSTFLAGS = nixpkgs.lib.optionalString (
+                portable && pkgs.stdenv.hostPlatform.isDarwin
+              ) "-L native=${pkgs.pkgsStatic.libiconv.dev}/lib";
               nativeCheckInputs = [ pkgs.buildPackages.git ];
               postInstall = nixpkgs.lib.optionalString (pkgs.stdenv.buildPlatform.canExecute pkgs.stdenv.hostPlatform) ''
                 installShellCompletion --cmd git-yard \
@@ -93,7 +81,6 @@
             pkgs.rustfmt
             pkgs.rust-analyzer
           ];
-          env.LIBGIT2_NO_VENDOR = "1";
         };
       });
     };

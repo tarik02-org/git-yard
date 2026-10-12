@@ -63,6 +63,9 @@ jobs:
       - name: Run clippy
         run: nix develop --command cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 
+      - name: Build default package
+        run: nix build .#default --out-link result-default
+
       - name: Build release binary
         run: nix build .#release
 
@@ -79,11 +82,11 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Publish release package closure
+      - name: Publish package closures
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: bash
         env:
           CACHIX_AUTH_TOKEN: ${{ secrets.CACHIX_AUTH_TOKEN }}
         run: |
           test -n "$CACHIX_AUTH_TOKEN"
-          cachix push tarik02-git-yard result
+          cachix push tarik02-git-yard result result-default
