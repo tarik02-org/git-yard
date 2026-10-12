@@ -21,7 +21,26 @@ pub struct Env {
 
 impl Env {
     pub fn new() -> Env {
-        let dir = tempfile::tempdir().unwrap();
+        Env::with_dir(tempfile::tempdir().unwrap())
+    }
+
+    /// A scratch directory whose filesystem accepts non-UTF-8 file names,
+    /// if one can be found.
+    pub fn accepting_raw_names() -> Option<Env> {
+        use std::os::unix::ffi::OsStringExt;
+        let probe = |dir: &Path| {
+            let name = dir.join(std::ffi::OsString::from_vec(b"probe\xff".to_vec()));
+            fs::write(&name, "").is_ok()
+        };
+        let default = tempfile::tempdir().unwrap();
+        if probe(default.path()) {
+            return Some(Env::with_dir(default));
+        }
+        let shm = tempfile::tempdir_in("/dev/shm").ok()?;
+        probe(shm.path()).then(|| Env::with_dir(shm))
+    }
+
+    fn with_dir(dir: TempDir) -> Env {
         let base = fs::canonicalize(dir.path()).unwrap();
         let root = base.join("work");
         let home = base.join("home");
