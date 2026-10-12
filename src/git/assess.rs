@@ -102,3 +102,21 @@ pub fn assess(
         bases: bases.to_vec(),
     }))
 }
+
+/// Nanoseconds since the epoch, the unit of assessment watermarks.
+pub fn now_nanos() -> i64 {
+    let nanos = crate::fs::tree_scan::system_time_nanos(std::time::SystemTime::now());
+    i64::try_from(nanos).unwrap_or(i64::MAX)
+}
+
+/// Assesses `seed` against the repository's current base refs and returns
+/// the facts with the watermark taken before anything was read.
+pub fn observe(
+    repo: &gix::Repository,
+    seed: &Seed,
+    interrupt: Arc<AtomicBool>,
+) -> Result<Option<(GitFacts, i64)>> {
+    let watermark = now_nanos();
+    let bases = refs::base_refs(repo);
+    Ok(assess(repo, seed, &bases, interrupt)?.map(|facts| (facts, watermark)))
+}

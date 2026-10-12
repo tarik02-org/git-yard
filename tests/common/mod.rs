@@ -177,3 +177,36 @@ pub fn worktree_list(env: &Env, dir: &Path) -> Vec<Listed> {
     records.extend(current);
     records
 }
+
+/// A freshly assessed candidate for the registration at `path`.
+pub fn candidate(
+    env: &Env,
+    registry: &Registry,
+    main: &Path,
+    path: &Path,
+) -> git_yard::core::candidate::Candidate {
+    use git_yard::core::candidate::Candidate;
+    use git_yard::core::obs::Obs;
+    let (repo, inventory) = env.inventory(registry, main);
+    let seed = inventory
+        .seeds
+        .into_iter()
+        .find(|seed| seed.path.as_path() == path)
+        .unwrap_or_else(|| panic!("no registration at {}", path.display()));
+    let (facts, watermark) = git_yard::git::assess::observe(
+        &repo,
+        &seed,
+        std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    )
+    .unwrap()
+    .unwrap();
+    Candidate {
+        seed,
+        git: Obs::Complete {
+            value: facts,
+            observed_at: 0,
+        },
+        storage: Obs::Pending,
+        watermark: Some(watermark),
+    }
+}
