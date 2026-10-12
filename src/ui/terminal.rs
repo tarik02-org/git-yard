@@ -59,7 +59,9 @@ pub fn open(command: &str) -> Result<Session, Error> {
         execute!(output, EnterAlternateScreen, EnableMouseCapture)?;
         Terminal::new(CrosstermBackend::new(output))
     };
-    let mut session = Session {
+    // No clear(): crossterm asks for the cursor position on stdout, which
+    // may be a pipe; the alternate screen starts blank anyway.
+    Ok(Session {
         terminal: match setup() {
             Ok(terminal) => terminal,
             Err(error) => {
@@ -72,12 +74,7 @@ pub fn open(command: &str) -> Result<Session, Error> {
         },
         previous_hook: Some(previous_hook),
         active,
-    };
-    session.terminal.clear().map_err(|source| Error::Io {
-        context: "clearing the terminal".into(),
-        source,
-    })?;
-    Ok(session)
+    })
 }
 
 fn restore() {
