@@ -95,6 +95,26 @@ impl RepoLocks {
         Ok(self.guard(repo, file))
     }
 
+    /// Like `try_lock`, retrying for up to `patience`. A lock can stay held
+    /// briefly after its owner lets go: a child forked at that moment keeps
+    /// the file description until it execs.
+    pub fn lock_within(
+        &self,
+        repo: &RepoKey,
+        patience: std::time::Duration,
+    ) -> Result<Option<RepoGuard>> {
+        let deadline = std::time::Instant::now() + patience;
+        loop {
+            if let Some(guard) = self.try_lock(repo)? {
+                return Ok(Some(guard));
+            }
+            if std::time::Instant::now() >= deadline {
+                return Ok(None);
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+
     /// `None` when another thread or process holds the lock.
     pub fn try_lock(&self, repo: &RepoKey) -> Result<Option<RepoGuard>> {
         if !self.held.repos().insert(repo.clone()) {

@@ -60,13 +60,16 @@ impl Recovery {
     }
 }
 
+/// How long recovery waits for a repository before reporting it busy.
+const BUSY_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
 /// Recovers what it safely can and reports every unfinished operation.
 pub fn reconcile(journal: &Journal, locks: &RepoLocks) -> anyhow::Result<(Vec<Recovery>, usize)> {
     let (unfinished, parse_errors) = journal.unfinished()?;
     let mut recoveries = Vec::new();
     for operation in unfinished {
         let repo = operation.key().repo();
-        let action = match locks.try_lock(&repo)? {
+        let action = match locks.lock_within(&repo, BUSY_AFTER)? {
             None => Action::Busy,
             Some(_guard) => {
                 let action = recover(&operation);
