@@ -91,7 +91,7 @@ pub fn list_command(forge: &Forge) -> Command {
                 .args(["--per-page", LIMIT, "--output", "json"])
                 .env("GITLAB_HOST", &forge.host)
                 .env("NO_COLOR", "1")
-                .env("NO_PROMPT", "1");
+                .env("GLAB_NO_PROMPT", "1");
             command
         }
     }

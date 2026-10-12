@@ -9,7 +9,7 @@ pub struct Remote {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
+#[serde(rename_all = "lowercase")]
 pub enum ForgeKind {
     GitHub,
     GitLab,

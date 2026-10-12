@@ -203,7 +203,11 @@ impl Ranker {
             return shown;
         }
 
-        let pattern = Pattern::parse(query, CaseMatching::Smart, Normalization::Smart);
+        let pattern = Pattern::parse(
+            &literal_request_numbers(query),
+            CaseMatching::Smart,
+            Normalization::Smart,
+        );
         let mut scored: Vec<(u32, Option<Timestamp>, usize)> = items
             .iter()
             .enumerate()
@@ -218,6 +222,21 @@ impl Ranker {
         scored.sort_by(|a, b| b.0.cmp(&a.0).then(b.1.cmp(&a.1)));
         scored.into_iter().map(|(_, _, index)| index).collect()
     }
+}
+
+/// `!123` is how GitLab names merge requests, but a leading `!` negates a
+/// search term; such terms are escaped to match literally.
+fn literal_request_numbers(query: &str) -> String {
+    query
+        .split(' ')
+        .map(|term| match term.strip_prefix('!') {
+            Some(number) if !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()) => {
+                format!("\\{term}")
+            }
+            _ => term.to_owned(),
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// A matched character scores about 16, so these only reorder close matches.
@@ -352,6 +371,12 @@ mod tests {
                 "charts origin/review-me"
             ]
         );
+    }
+
+    #[test]
+    fn merge_request_numbers_match_literally() {
+        assert_eq!(literal_request_numbers("cli !4090"), "cli \\!4090");
+        assert_eq!(literal_request_numbers("!draft !"), "!draft !");
     }
 
     #[test]

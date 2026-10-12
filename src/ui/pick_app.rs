@@ -234,12 +234,20 @@ impl<C: Control> PickApp<C> {
             None if self.query.value().trim().is_empty() => Vec::new(),
             None => {
                 let mut seen = HashSet::new();
-                self.results
+                let shown: Vec<Arc<Project>> = self
+                    .results
                     .iter()
                     .map(|&index| self.items[index].project.clone())
                     .filter(|project| seen.insert(project.repo.clone()))
                     .take(REFRESH_TOP)
-                    .collect()
+                    .collect();
+                if shown.is_empty() {
+                    // A request number matches nothing until requests are
+                    // loaded: refresh projects named by any search word.
+                    self.projects_named_in_query()
+                } else {
+                    shown
+                }
             }
         };
         let stale_after = self.config.pick.request_minutes as i64 * 60;
@@ -255,6 +263,28 @@ impl<C: Control> PickApp<C> {
                 self.querying.insert(project.repo.clone());
             }
         }
+    }
+
+    fn projects_named_in_query(&self) -> Vec<Arc<Project>> {
+        let words: Vec<String> = self
+            .query
+            .value()
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect();
+        let mut seen = HashSet::new();
+        self.items
+            .iter()
+            .map(|item| &item.project)
+            .filter(|project| {
+                let label = project.label.to_lowercase();
+                words.iter().any(|word| label.contains(word.as_str()))
+            })
+            .filter(|project| seen.insert(project.repo.clone()))
+            .take(REFRESH_TOP)
+            .cloned()
+            .collect()
     }
 
     fn query_changed(&mut self) {
