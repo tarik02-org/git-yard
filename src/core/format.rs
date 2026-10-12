@@ -1,7 +1,9 @@
+//! Human-readable sizes, ages, paths and truncation.
+
+use std::path::Path;
+
 use unicode_truncate::UnicodeTruncateStr;
 use unicode_width::UnicodeWidthStr;
-
-use crate::model::Integration;
 
 pub fn size(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "K", "M", "G", "T"];
@@ -50,16 +52,12 @@ pub fn ago(seconds: i64) -> String {
     }
 }
 
-pub fn integration(integration: &Integration) -> String {
-    match integration {
-        Integration::IsBase => "base branch".into(),
-        Integration::Merged { into } => format!("merged into {into}"),
-        Integration::ChangesPresent { into } => {
-            format!("changes present in {into} (squash/rebase)")
-        }
-        Integration::NotIntegrated { base, ahead } => format!("{ahead} commits not in {base}"),
-        Integration::NoBase => "no base branch".into(),
-        Integration::Unborn => "no commits".into(),
+/// Home-relative, lossy display of a path.
+pub fn path(path: &Path) -> String {
+    match dirs::home_dir().and_then(|home| path.strip_prefix(&home).ok().map(Path::to_path_buf)) {
+        Some(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
+        Some(rest) => format!("~/{}", rest.display()),
+        None => path.display().to_string(),
     }
 }
 
@@ -100,5 +98,16 @@ mod tests {
         assert_eq!(age(30), "now");
         assert_eq!(age(3 * 86_400), "3d");
         assert_eq!(age(90 * 86_400), "3mo");
+    }
+
+    #[test]
+    fn truncation_keeps_the_informative_ends() {
+        assert_eq!(truncate_end("feature/ABC-123-long", 10), "feature/A…");
+        assert_eq!(truncate_end("漢字abc", 4), "漢…");
+        assert_eq!(truncate_end("abc", 0), "");
+        assert_eq!(truncate_middle("漢字abc", 4), "…abc");
+        let shown = truncate_middle("~/work/bb/sub/sub.feature-SUB-1313", 22);
+        assert_eq!(shown.width(), 22);
+        assert!(shown.starts_with("~/work") && shown.ends_with("SUB-1313"));
     }
 }

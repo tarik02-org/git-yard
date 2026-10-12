@@ -1,15 +1,16 @@
-use std::path::{Path, PathBuf};
+//! Configuration: the user's config file or `--config`, never a file found
+//! in the scanned tree, since it can name commands to run.
 
-use anyhow::{Context, Result};
+use std::path::{Component, Path, PathBuf};
+
 use serde::Deserialize;
 
-pub const CONFIG_FILE: &str = ".git-yard.toml";
+use super::error::{Error, Result};
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct Config {
-    /// Scan roots, relative to the config file. Defaults to the directory the
-    /// command runs in.
+    /// Scan roots, relative to the config file.
     pub roots: Vec<PathBuf>,
     /// How many directory levels below a root to search for repositories.
     /// The search never descends into a repository it found.
@@ -161,31 +162,35 @@ impl Default for Workers {
     }
 }
 
-impl Config {
-    /// Loads `explicit`, or the nearest `.git-yard.toml` at or above `cwd`,
-    /// or the user's `~/.config/git-yard/config.toml`.
-    /// Command-line paths replace configured roots; without either, `cwd` is
-    /// the only root.
-    pub fn load(cwd: &Path, explicit: Option<&Path>, paths: &[PathBuf]) -> Result<Self> {
-        let file = match explicit {
-            Some(path) => Some(path.to_path_buf()),
-            None => cwd
-                .ancestors()
-                .map(|dir| dir.join(CONFIG_FILE))
-                .find(|candidate| candidate.is_file())
-                .or_else(|| {
-                    dirs::config_dir()
-                        .map(|dir| dir.join("git-yard/config.toml"))
-                        .filter(|file| file.is_file())
-                }),
-        };
+/// The user's config file, if the platform has a config directory.
+pub fn user_config_file() -> Option<PathBuf> {
+    dirs::config_dir().map(|dir| dir.join("git-yard/config.toml"))
+}
 
+impl Config {
+    /// Loads `explicit`, or the user's config file when it exists.
+    /// Command-line `paths` replace configured roots; without either,
+    /// `default_root` is the only root. Every root must exist.
+    pub fn load(
+        cwd: &Path,
+        explicit: Option<&Path>,
+        paths: &[PathBuf],
+        default_root: impl FnOnce() -> PathBuf,
+    ) -> Result<Self> {
+        let file = match explicit {
+            Some(path) => Some(cwd.join(path)),
+            None => user_config_file().filter(|file| file.is_file()),
+        };
         let mut config = match &file {
             Some(file) => {
-                let text = std::fs::read_to_string(file)
-                    .with_context(|| format!("reading {}", file.display()))?;
-                let mut config: Config =
-                    toml::from_str(&text).with_context(|| format!("parsing {}", file.display()))?;
+                let text = std::fs::read_to_string(file).map_err(|source| Error::Io {
+                    context: format!("reading {}", file.display()),
+                    source,
+                })?;
+                let mut config: Config = toml::from_str(&text).map_err(|error| Error::Config {
+                    file: file.clone(),
+                    message: error.to_string(),
+                })?;
                 let base = file.parent().unwrap_or(cwd);
                 config.roots = config
                     .roots
@@ -204,8 +209,20 @@ impl Config {
                 .collect();
         }
         if config.roots.is_empty() {
-            config.roots.push(cwd.to_path_buf());
+            config.roots.push(default_root());
         }
+        for root in &config.roots {
+            if !root.is_dir() {
+                return Err(Error::Usage(format!(
+                    "scan root {} does not exist or is not a directory",
+                    root.display()
+                )));
+            }
+        }
+        config.validate().map_err(|message| Error::Config {
+            file: file.clone().unwrap_or_default(),
+            message,
+        })?;
         config.workers.scan = config.workers.scan.max(1);
         config.workers.measure = config.workers.measure.max(1);
         config.workers.walk = config.workers.walk.max(1);
@@ -214,12 +231,58 @@ impl Config {
         Ok(config)
     }
 
+    pub fn validate(&self) -> std::result::Result<(), String> {
+        let w = &self.weights;
+        let parts = [
+            ("inactivity", w.inactivity),
+            ("commit_age", w.commit_age),
+            ("size", w.size),
+            ("integration", w.integration),
+            ("protected_factor", w.protected_factor),
+        ];
+        for (name, value) in parts {
+            if !value.is_finite() || value < 0.0 {
+                return Err(format!(
+                    "weights.{name} must be a finite number ≥ 0, got {value}"
+                ));
+            }
+        }
+        if parts[..4].iter().all(|(_, value)| *value == 0.0) {
+            return Err("at least one rating weight must be above 0".into());
+        }
+        validate_worktree_path(&self.pick.worktree_path)
+    }
+
     pub fn is_protected(&self, branch: &str) -> bool {
         self.protected_branches.iter().any(|name| name == branch)
     }
 }
 
-fn expand_home(path: &Path) -> PathBuf {
+/// New worktrees must land in a directory the template names, never above
+/// it: no `..` components, and the branch only in the last component.
+fn validate_worktree_path(template: &str) -> std::result::Result<(), String> {
+    let path = Path::new(template);
+    let invalid = |reason: &str| Err(format!("pick.worktree_path {template:?}: {reason}"));
+    if path
+        .components()
+        .any(|component| component == Component::ParentDir)
+    {
+        return invalid("must not contain `..`");
+    }
+    let Some(last) = path.file_name().and_then(|name| name.to_str()) else {
+        return invalid("must end in a file name");
+    };
+    if !last.contains("{branch}") {
+        return invalid("the last component must contain {branch}");
+    }
+    let parent = path.parent().map(|parent| parent.to_string_lossy());
+    if parent.is_some_and(|parent| parent.contains("{branch}")) {
+        return invalid("{branch} may only appear in the last component");
+    }
+    Ok(())
+}
+
+pub fn expand_home(path: &Path) -> PathBuf {
     match (path.strip_prefix("~"), dirs::home_dir()) {
         (Ok(rest), Some(home)) => home.join(rest),
         _ => path.to_path_buf(),
@@ -230,36 +293,56 @@ fn expand_home(path: &Path) -> PathBuf {
 mod tests {
     use super::*;
 
-    #[test]
-    fn finds_config_upwards_and_resolves_roots_relative_to_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let nested = dir.path().join("a/b");
-        std::fs::create_dir_all(&nested).unwrap();
-        std::fs::write(
-            dir.path().join(CONFIG_FILE),
-            "roots = [\"projects\"]\nstale_days = 3\n",
-        )
-        .unwrap();
+    fn load(dir: &Path, text: &str) -> Result<Config> {
+        let file = dir.join("config.toml");
+        std::fs::write(&file, text).unwrap();
+        Config::load(dir, Some(&file), &[], || dir.to_path_buf())
+    }
 
-        let config = Config::load(&nested, None, &[]).unwrap();
+    #[test]
+    fn roots_resolve_relative_to_the_config_file_and_must_exist() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("projects")).unwrap();
+        let config = load(dir.path(), "roots = [\"projects\"]\nstale_days = 3\n").unwrap();
         assert_eq!(config.roots, vec![dir.path().join("projects")]);
         assert_eq!(config.stale_days, 3);
 
-        let overridden = Config::load(&nested, None, &[PathBuf::from("x")]).unwrap();
-        assert_eq!(overridden.roots, vec![nested.join("x")]);
+        let error = load(dir.path(), "roots = [\"missing\"]\n").unwrap_err();
+        assert!(error.to_string().contains("does not exist"), "{error}");
     }
 
     #[test]
-    fn defaults_to_cwd() {
+    fn rejects_unknown_keys_bad_weights_and_escaping_paths() {
         let dir = tempfile::tempdir().unwrap();
-        let config = Config::load(dir.path(), None, &[]).unwrap();
-        assert_eq!(config.roots, vec![dir.path().to_path_buf()]);
+        assert!(load(dir.path(), "stale_dayz = 3\n").is_err());
+        assert!(load(dir.path(), "[weights]\nsize = nan\n").is_err());
+        assert!(load(dir.path(), "[weights]\nsize = -1\n").is_err());
+        assert!(
+            load(
+                dir.path(),
+                "[weights]\ninactivity = 0\ncommit_age = 0\nsize = 0\nintegration = 0\n"
+            )
+            .is_err()
+        );
+        assert!(load(dir.path(), "[pick]\nworktree_path = \"../{branch}\"\n").is_err());
+        assert!(load(dir.path(), "[pick]\nworktree_path = \"{branch}/x\"\n").is_err());
+        assert!(
+            load(
+                dir.path(),
+                "[pick]\nworktree_path = \"{main}.wt/{branch}\"\n"
+            )
+            .is_ok()
+        );
     }
 
     #[test]
-    fn rejects_unknown_keys() {
+    fn defaults_to_the_given_root() {
         let dir = tempfile::tempdir().unwrap();
-        std::fs::write(dir.path().join(CONFIG_FILE), "stale_dayz = 3\n").unwrap();
-        assert!(Config::load(dir.path(), None, &[]).is_err());
+        let config = Config::load(dir.path(), None, &[], || dir.path().to_path_buf());
+        // A user config on the machine running tests may set roots; only
+        // check the fallback when there is none.
+        if user_config_file().is_none_or(|file| !file.is_file()) {
+            assert_eq!(config.unwrap().roots, vec![dir.path().to_path_buf()]);
+        }
     }
 }
