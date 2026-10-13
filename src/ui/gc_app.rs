@@ -88,6 +88,8 @@ pub struct GcApp<C: Control> {
     pub editing_filter: bool,
     pub details: bool,
     pub help: bool,
+    /// Also list main worktrees and blocked rows, which cannot be removed.
+    pub show_all: bool,
     pub toast: Toast,
     /// Startup messages, such as recovered removals.
     pub notices: Vec<String>,
@@ -117,6 +119,7 @@ impl<C: Control> GcApp<C> {
             editing_filter: false,
             details: false,
             help: false,
+            show_all: false,
             toast: Toast::default(),
             notices: Vec::new(),
             compacted: HashSet::new(),
@@ -161,6 +164,29 @@ impl<C: Control> GcApp<C> {
         )
     }
 
+    /// Whether a row is listed: removable, still being assessed, or part
+    /// of a removal; the rest only with `show_all`.
+    pub fn is_listed(&self, key: &WorktreeKey) -> bool {
+        if self.compacted.contains(key) {
+            return false;
+        }
+        self.show_all
+            || self.model.rows.get(key).is_some_and(|row| {
+                row.removal.is_some()
+                    || !matches!(row.eligibility, Err(ref block) if !block.is_pending())
+            })
+    }
+
+    /// Rows hidden because they cannot be acted on.
+    pub fn hidden_count(&self) -> usize {
+        self.model
+            .selection
+            .order()
+            .iter()
+            .filter(|key| !self.compacted.contains(*key) && !self.is_listed(key))
+            .count()
+    }
+
     /// Rows that pass the filter, in list order.
     pub fn visible(&self) -> Vec<WorktreeKey> {
         let terms: Vec<String> = self
@@ -174,7 +200,7 @@ impl<C: Control> GcApp<C> {
             .selection
             .order()
             .iter()
-            .filter(|key| !self.compacted.contains(*key))
+            .filter(|key| self.is_listed(key))
             .filter(|key| {
                 terms.is_empty()
                     || self.model.rows.get(*key).is_some_and(|row| {
@@ -264,6 +290,14 @@ impl<C: Control> GcApp<C> {
             KeyCode::Char('C') => self.compact(),
             KeyCode::Char('p') => self.toggle_measure_pause(),
             KeyCode::Char('?') => self.help = !self.help,
+            KeyCode::Char('a') => {
+                self.show_all = !self.show_all;
+                self.toast.say(if self.show_all {
+                    "showing main worktrees and blocked rows too"
+                } else {
+                    "hiding rows that cannot be removed (a to show)"
+                });
+            }
             _ => {}
         }
         Flow::Continue
@@ -305,9 +339,6 @@ impl<C: Control> GcApp<C> {
         let Some(key) = self.focused() else { return };
         match self.model.selection.toggle(&key, &self.model.rows) {
             Ok(_) => {}
-            Err(ToggleError::BelowCutoff) => self
-                .toast
-                .say("below the cutoff: move down (j) or move the cutoff (J) to enable"),
             Err(ToggleError::NotEligible) => {
                 let reason = self.model.rows[&key]
                     .eligibility
@@ -382,7 +413,7 @@ impl<C: Control> GcApp<C> {
         let snapshot = self.model.selection.snapshot(&self.model.rows);
         if snapshot.is_empty() {
             self.toast
-                .say("nothing selected: move the cutoff with J or =");
+                .say("nothing checked: space checks a row, J moves the line down");
             return;
         }
         let visible: HashSet<WorktreeKey> = self.visible().into_iter().collect();

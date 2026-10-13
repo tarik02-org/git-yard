@@ -20,6 +20,9 @@ pub struct Config {
     /// A worktree counts as stale when both its last use and its last commit
     /// are older than this.
     pub stale_days: u32,
+    /// Recommended worktrees the cleanup cutoff keeps above the line at
+    /// first, so a batch stays reviewable however long the list is.
+    pub batch_size: usize,
     /// Branches that never start checked and are ranked down.
     pub protected_branches: Vec<String>,
     pub weights: Weights,
@@ -120,6 +123,7 @@ impl Default for Config {
             .map(String::from)
             .to_vec(),
             stale_days: 14,
+            batch_size: 20,
             protected_branches: [
                 "main",
                 "master",
