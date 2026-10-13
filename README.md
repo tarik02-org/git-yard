@@ -70,22 +70,23 @@ Without a search the picker shows worktrees, base branches and recent picks; a s
 | Key | Action |
 | --- | --- |
 | j/k, Up/Down, Ctrl-D/Ctrl-U, PgUp/PgDn, g/G, Home/End, wheel | move |
-| J/K | move the cutoff down/up |
-| = | put the cutoff below the focused row |
-| Space, click the box | check or uncheck a row above the cutoff |
-| D | delete every checked row above the cutoff |
+| J/K | move the line down/up |
+| = | put the line below the focused row |
+| Space, click the box | check or uncheck a row |
+| D | delete every checked row |
 | x x | delete the focused row now |
 | c | cancel a queued removal |
 | / | filter; Esc clears |
-| r / R | rerank / reset cutoff and choices |
+| r / R | rerank / reset the line and choices |
+| a | also show main worktrees and blocked rows |
 | Enter, Tab | details |
 | C | hide removed rows |
 | p | pause size measurement |
 | ? | all keys |
 | q, Ctrl-C | quit; with removals running, wait for them (press again to force) |
-| drag the cutoff line | move the cutoff |
+| drag the line | move the line |
 
-Rows above the cutoff that are recommended start checked. A choice you make about a row lapses when its facts change (a new commit, edited files), so nothing is removed on stale evidence.
+Recommended rows (merged or squashed, clean, not protected, stale) above the line start checked; the line first sits below the top `batch_size` of them so a batch stays reviewable however long the list is, and moves with the ranking until you act on the list. Any removable row can be checked on either side. Main worktrees and blocked rows are hidden until `a`. A choice you make about a row lapses when its facts change (a new commit, edited files), so nothing is removed on stale evidence.
 
 ## What removal does
 
@@ -103,6 +104,7 @@ Each removal is checked again against what you saw, then the directory is moved 
 roots = ["~/work"]          # relative to this file
 max_depth = 4               # directory levels searched below a root
 stale_days = 14             # younger use or commits keep a row unchecked
+batch_size = 20             # recommended rows the line starts below
 protected_branches = ["main", "master", "develop", "dev", "trunk", "staging", "production"]
 
 [weights]                   # rating, finite and ≥ 0, not all zero

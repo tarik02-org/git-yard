@@ -280,6 +280,10 @@ impl<C: Control> GcApp<C> {
         if deleting > 0 {
             spans.push(Span::from(format!(" · deleting {deleting}")).magenta());
         }
+        let hidden = self.hidden_count();
+        if hidden > 0 {
+            spans.push(Span::from(format!(" · {hidden} not removable, hidden (a)")).dim());
+        }
         if !model.errors.is_empty() {
             spans.push(Span::from(format!(" · {} repo errors", model.errors.len())).red());
         }
@@ -372,7 +376,7 @@ impl<C: Control> GcApp<C> {
         });
         let rows: Vec<TableRow> = window
             .iter()
-            .map(|(slot, pin)| match slot {
+            .map(|(slot, _)| match slot {
                 Slot::Row(id) => self.table_row(id, cutoff, &columns, &widths),
                 Slot::Top => {
                     let cells = columns
@@ -380,25 +384,8 @@ impl<C: Control> GcApp<C> {
                         .map(|column| Cell::from(if *column == Col::Repo { "(top)" } else { "" }));
                     TableRow::new(cells).style(Style::new().fg(Color::DarkGray))
                 }
-                Slot::Cutoff => {
-                    let label = match pin {
-                        Pin::None => "cutoff ",
-                        Pin::Above => "cutoff ▲ ",
-                        Pin::Below => "cutoff ▼ ",
-                    };
-                    // Every cell is filled with rule characters, truncated to
-                    // its column, so the line spans the table at any width;
-                    // the label sits in the repo column, which is always shown.
-                    let rule = "─".repeat(usize::from(area.width));
-                    let cells = columns.iter().map(|column| {
-                        Cell::from(if *column == Col::Repo {
-                            format!("{label}{rule}")
-                        } else {
-                            rule.clone()
-                        })
-                    });
-                    TableRow::new(cells).style(Style::new().fg(Color::Yellow))
-                }
+                // Drawn over the table below, across every column.
+                Slot::Cutoff => TableRow::new(columns.iter().map(|_| Cell::from(""))),
             })
             .collect();
         let header =
@@ -409,6 +396,18 @@ impl<C: Control> GcApp<C> {
             .row_highlight_style(Style::new().add_modifier(Modifier::REVERSED));
         let mut state = TableState::default().with_selected(focus_row);
         frame.render_stateful_widget(table, area, &mut state);
+        if let Some((index, (_, pin))) = window
+            .iter()
+            .enumerate()
+            .find(|(_, (slot, _))| *slot == Slot::Cutoff)
+        {
+            let line = Rect {
+                y: area.y + 1 + index as u16,
+                height: 1,
+                ..area
+            };
+            frame.render_widget(self.cutoff_line(*pin, line.width), line);
+        }
         self.table_area = area;
         self.table_rows = window
             .iter()
@@ -418,6 +417,23 @@ impl<C: Control> GcApp<C> {
                 Slot::Row(id) => Slot::Row((*id).clone()),
             })
             .collect();
+    }
+
+    /// The line under the batch: what it means and how to move it.
+    fn cutoff_line(&self, pin: Pin, width: u16) -> Paragraph<'static> {
+        let arrow = match pin {
+            Pin::None => "",
+            Pin::Above => "▲ ",
+            Pin::Below => "▼ ",
+        };
+        let label = format!(" {arrow}recommended rows above start checked · J/K move · = here ");
+        let rule = "─".repeat(usize::from(width).saturating_sub(label.width() + 3));
+        Paragraph::new(Line::from(vec![
+            Span::from("───"),
+            Span::from(label).bold(),
+            Span::from(rule),
+        ]))
+        .style(Style::new().fg(Color::Yellow))
     }
 
     fn table_row(
@@ -434,7 +450,6 @@ impl<C: Control> GcApp<C> {
         };
         let above = model.selection.position(id).is_some_and(|p| p < cutoff);
         let candidate = &row.candidate;
-        // Below the cutoff this is the disabled, would-be state.
         let checked = model.selection.is_marked(id, &model.rows);
         let usage_prefix = match candidate.storage {
             Obs::Stale { .. } => "~",
@@ -489,18 +504,17 @@ impl<C: Control> GcApp<C> {
             Cell::from(text)
         });
 
-        // Rows below the cutoff use a muted palette throughout; explicit
-        // colours rather than DIM, which many terminals ignore.
+        // Rows below the line are muted, checked rows green on both sides;
+        // explicit colours rather than DIM, which many terminals ignore.
         let style = if row.is_removed() {
             Style::new()
                 .fg(Color::DarkGray)
                 .add_modifier(Modifier::CROSSED_OUT)
         } else {
             let color = match (above, row.eligibility.is_ok(), checked) {
-                (true, true, true) => Some(Color::Green),
+                (_, true, true) => Some(Color::Green),
                 (true, true, false) => None,
                 (true, false, _) => Some(Color::DarkGray),
-                (false, true, true) => Some(Color::Indexed(65)),
                 (false, true, false) => Some(Color::Indexed(244)),
                 (false, false, _) => Some(Color::Indexed(239)),
             };
@@ -534,19 +548,15 @@ impl<C: Control> GcApp<C> {
 
         let mut status = vec![
             Span::from(format!(
-                "selected {} ({})",
+                "checked {} ({})",
                 selected.len(),
                 format::size(bytes)
             ))
             .bold(),
-            Span::from(format!(
-                " · cutoff {}/{}",
-                model.selection.cutoff(),
-                model.selection.len()
-            )),
+            Span::from(" · D removes them"),
         ];
         if hidden > 0 {
-            status.push(Span::from(format!(" · {hidden} selected hidden by filter")).yellow());
+            status.push(Span::from(format!(" · {hidden} checked hidden by filter")).yellow());
         }
         if !self.editing_filter && !self.filter.value().is_empty() {
             status.push(Span::from(format!(" · filter: {}", self.filter.value())).cyan());
@@ -556,9 +566,9 @@ impl<C: Control> GcApp<C> {
         }
 
         let keys = if self.help {
-            "j/k move · J/K cutoff · = cutoff here · space check · D delete selected · xx delete now · c cancel · / filter · r rerank · R reset · ⏎ details · C hide removed · p pause sizes · q quit · mouse: click row, click box to check, drag cutoff, wheel"
+            "j/k move · J/K line · = line here · space check · D delete checked · xx delete now · c cancel · / filter · a show all · r rerank · R reset · ⏎ details · C hide removed · p pause sizes · q quit · mouse: click row, click box to check, drag line, wheel"
         } else {
-            "space check · J/K cutoff · D delete selected · xx delete now · / filter · ⏎ details · ? keys · q quit"
+            "space check · J/K line · D delete checked · xx delete now · / filter · a show all · ⏎ details · ? keys · q quit"
         };
         let [status_area, keys_area] =
             Layout::vertical([Constraint::Length(1), Constraint::Length(1)]).areas(area);

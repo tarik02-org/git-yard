@@ -73,6 +73,11 @@ impl fmt::Display for Block {
 }
 
 impl Block {
+    /// The assessment is not finished; the block may lift.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, Block::Pending)
+    }
+
     pub fn short(&self) -> &'static str {
         match self {
             Block::MainWorktree => "main",

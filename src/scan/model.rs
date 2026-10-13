@@ -79,9 +79,9 @@ pub struct Model {
 impl Model {
     pub fn new(config: Arc<Config>) -> Self {
         Model {
+            selection: Selection::new(config.batch_size),
             config,
             rows: HashMap::new(),
-            selection: Selection::default(),
             now: now(),
             discovery_done: false,
             repos: 0,

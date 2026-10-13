@@ -1,11 +1,12 @@
 //! The ranked list, its cutoff, and per-row overrides.
 //!
-//! A row is marked when it is eligible and either recommended or explicitly
-//! included, and not explicitly excluded. Marks are computed live from the
-//! current facts. Overrides remember the decision revision they were made
-//! against and lapse when the facts change, so a choice never outlives the
-//! evidence it was based on. Rows above the cutoff that are marked are
-//! selected; rows below it show their would-be mark but are disabled.
+//! The cutoff bounds a batch: recommended rows above it start checked, rows
+//! below it start unchecked. Until the user acts on the list, the cutoff
+//! follows the ranking so the batch holds `batch` recommended rows. Any
+//! eligible row can be checked or unchecked wherever it is. Marks are
+//! computed live from the current facts. Overrides remember the decision
+//! revision they were made against and lapse when the facts change, so a
+//! choice never outlives the evidence it was based on.
 
 use std::collections::HashMap;
 
@@ -24,7 +25,6 @@ pub trait Facts {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToggleError {
-    BelowCutoff,
     NotEligible,
     Unavailable,
 }
@@ -43,13 +43,22 @@ pub type Snapshot = Vec<(WorktreeKey, DecisionRevision)>;
 pub struct Selection {
     order: Vec<WorktreeKey>,
     positions: HashMap<WorktreeKey, usize>,
-    /// The order is held still once the user acts on it.
+    /// The order and cutoff are held still once the user acts on them.
     frozen: bool,
     cutoff: usize,
+    /// Recommended rows the automatic cutoff keeps above the line.
+    batch: usize,
     overrides: HashMap<WorktreeKey, Override>,
 }
 
 impl Selection {
+    pub fn new(batch: usize) -> Self {
+        Selection {
+            batch,
+            ..Selection::default()
+        }
+    }
+
     pub fn order(&self) -> &[WorktreeKey] {
         &self.order
     }
@@ -84,14 +93,34 @@ impl Selection {
         self.order.push(key);
     }
 
-    /// Re-sorts after rating changes unless frozen, and drops overrides
-    /// whose facts changed.
+    /// Re-sorts after rating changes and moves the cutoff after the batch,
+    /// unless frozen; drops overrides whose facts changed.
     pub fn refresh(&mut self, facts: &impl Facts) {
         self.overrides
             .retain(|key, choice| facts.revision(key) == Some(choice.revision));
         if !self.frozen {
             self.sort(facts);
+            self.cutoff = self.automatic_cutoff(facts);
         }
+    }
+
+    /// Just below the `batch`-th recommended row; the end of the list when
+    /// there are fewer, so every recommended row starts checked. A batch of
+    /// zero keeps the line at the top: nothing starts checked.
+    fn automatic_cutoff(&self, facts: &impl Facts) -> usize {
+        if self.batch == 0 {
+            return 0;
+        }
+        let mut recommended = 0;
+        for (position, key) in self.order.iter().enumerate() {
+            if facts.available(key) && facts.eligible(key) && facts.recommended(key) {
+                recommended += 1;
+                if recommended == self.batch {
+                    return position + 1;
+                }
+            }
+        }
+        self.order.len()
     }
 
     pub fn remove(&mut self, key: &WorktreeKey) {
@@ -117,11 +146,8 @@ impl Selection {
 
     /// Flips the row's mark and returns whether it is now marked.
     pub fn toggle(&mut self, key: &WorktreeKey, facts: &impl Facts) -> Result<bool, ToggleError> {
-        let Some(position) = self.position(key) else {
+        if !self.positions.contains_key(key) {
             return Err(ToggleError::Unavailable);
-        };
-        if position >= self.cutoff {
-            return Err(ToggleError::BelowCutoff);
         }
         if !facts.available(key) {
             return Err(ToggleError::Unavailable);
@@ -134,7 +160,7 @@ impl Selection {
         };
         self.frozen = true;
         let include = !self.is_marked(key, facts);
-        if include == facts.recommended(key) {
+        if include == self.default_mark(key, facts) {
             self.overrides.remove(key);
         } else {
             self.overrides
@@ -143,7 +169,12 @@ impl Selection {
         Ok(include)
     }
 
-    /// The checkbox state regardless of the cutoff.
+    /// Recommended and above the cutoff.
+    fn default_mark(&self, key: &WorktreeKey, facts: &impl Facts) -> bool {
+        facts.recommended(key) && self.position(key).is_some_and(|p| p < self.cutoff)
+    }
+
+    /// The checkbox state: an override where one holds, else the default.
     pub fn is_marked(&self, key: &WorktreeKey, facts: &impl Facts) -> bool {
         if !(facts.available(key) && facts.eligible(key)) {
             return false;
@@ -151,19 +182,12 @@ impl Selection {
         let revision = facts.revision(key);
         match self.overrides.get(key) {
             Some(choice) if Some(choice.revision) == revision => choice.include,
-            _ => facts.recommended(key),
+            _ => self.default_mark(key, facts),
         }
     }
 
-    /// Marked and above the cutoff: part of the selection.
-    pub fn is_checked(&self, key: &WorktreeKey, facts: &impl Facts) -> bool {
-        self.position(key)
-            .is_some_and(|position| position < self.cutoff)
-            && self.is_marked(key, facts)
-    }
-
     pub fn selected(&self, facts: &impl Facts) -> Vec<WorktreeKey> {
-        self.order[..self.cutoff]
+        self.order
             .iter()
             .filter(|key| self.is_marked(key, facts))
             .cloned()
@@ -184,12 +208,11 @@ impl Selection {
         self.frozen = true;
     }
 
-    /// Clears the cutoff and every override, and resumes live ordering.
+    /// Clears every override and resumes live ordering and cutoff.
     pub fn reset(&mut self, facts: &impl Facts) {
         self.frozen = false;
-        self.cutoff = 0;
         self.overrides.clear();
-        self.sort(facts);
+        self.refresh(facts);
     }
 
     fn sort(&mut self, facts: &impl Facts) {
@@ -258,8 +281,12 @@ mod tests {
     }
 
     fn setup(ranks: &[(&str, f64)]) -> (Selection, Fake) {
+        setup_with_batch(ranks, 0)
+    }
+
+    fn setup_with_batch(ranks: &[(&str, f64)], batch: usize) -> (Selection, Fake) {
         let fake = Fake::default();
-        let mut selection = Selection::default();
+        let mut selection = Selection::new(batch);
         for (name, rank) in ranks {
             fake.rank.borrow_mut().insert(key(name), *rank);
             selection.push(key(name));
@@ -283,7 +310,39 @@ mod tests {
     }
 
     #[test]
-    fn overrides_apply_above_cutoff_and_survive_cutoff_moves() {
+    fn automatic_cutoff_follows_the_batch_until_the_user_acts() {
+        let (mut selection, fake) = setup_with_batch(
+            &[("a", 5.0), ("b", 4.0), ("c", 3.0), ("d", 2.0), ("e", 1.0)],
+            2,
+        );
+        fake.unrecommended.borrow_mut().insert(key("b"));
+        selection.refresh(&fake);
+        // Two recommended rows above the line, b skipped in between.
+        assert_eq!(selection.cutoff(), 3);
+        assert_eq!(names(&selection.selected(&fake)), ["a", "c"]);
+
+        // a was removed: the batch reaches further down.
+        fake.unavailable.borrow_mut().insert(key("a"));
+        selection.refresh(&fake);
+        assert_eq!(selection.cutoff(), 4);
+        assert_eq!(names(&selection.selected(&fake)), ["c", "d"]);
+
+        selection.move_cutoff(-1);
+        fake.unavailable.borrow_mut().clear();
+        selection.refresh(&fake);
+        assert_eq!(selection.cutoff(), 3, "a user-set cutoff holds");
+
+        selection.reset(&fake);
+        assert_eq!(selection.cutoff(), 3);
+
+        // Fewer recommended rows than the batch: the line sits at the end.
+        let (mut small, fake) = setup_with_batch(&[("a", 2.0), ("b", 1.0)], 5);
+        small.refresh(&fake);
+        assert_eq!(small.cutoff(), 2);
+    }
+
+    #[test]
+    fn overrides_apply_on_both_sides_of_the_cutoff() {
         let (mut selection, fake) = setup(&[("a", 4.0), ("b", 3.0), ("c", 2.0), ("d", 1.0)]);
         fake.ineligible.borrow_mut().insert(key("b"));
         fake.unrecommended.borrow_mut().insert(key("c"));
@@ -298,13 +357,12 @@ mod tests {
         );
         assert_eq!(names(&selection.selected(&fake)), ["c", "d"]);
 
+        // Below the line, a recommended row is unchecked by default but an
+        // explicit check holds.
         selection.set_cutoff(1);
-        assert!(selection.selected(&fake).is_empty());
-        assert!(selection.is_marked(&key("c"), &fake));
-        assert_eq!(
-            selection.toggle(&key("c"), &fake),
-            Err(ToggleError::BelowCutoff)
-        );
+        assert_eq!(names(&selection.selected(&fake)), ["c"]);
+        assert_eq!(selection.toggle(&key("d"), &fake), Ok(true));
+        assert_eq!(names(&selection.selected(&fake)), ["c", "d"]);
         selection.set_cutoff(4);
         assert_eq!(names(&selection.selected(&fake)), ["c", "d"]);
     }
