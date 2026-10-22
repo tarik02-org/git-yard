@@ -68,23 +68,54 @@ pub fn ahead(repo: &gix::Repository, tip: ObjectId, base: ObjectId) -> Result<us
     Ok(count)
 }
 
-/// True when every path the branch changed since its merge base has the
-/// same content and mode in the base: squash and rebase merges. Stricter
-/// than a merge simulation; later edits to the same paths on the base make
-/// it report "not integrated", which errs on the side of keeping work.
+/// Base commits searched for a squash or rebase merge, newest first.
+/// Bounds the walk for branches that were never merged.
+const SQUASH_SEARCH_LIMIT: usize = 5000;
+
+/// True when every path the branch changed since its merge base had the
+/// same content and mode in the base, at its tip or at one of its
+/// first-parent commits since the merge base: squash and rebase merges,
+/// including ones the base has edited further since. Stricter than a merge
+/// simulation, which conflicts once the base reworks the merged paths;
+/// a squash that resolved conflicts is still reported "not integrated",
+/// which errs on the side of keeping work.
 pub fn changes_present(repo: &gix::Repository, tip: ObjectId, base: ObjectId) -> Result<bool> {
     let Some(merge_base) = repo.merge_base(tip, base)? else {
         return Ok(false);
     };
+    let merge_base = merge_base.detach();
     let tree = |commit: ObjectId| -> Result<ObjectId> {
         Ok(repo.find_commit(commit)?.tree_id()?.detach())
     };
-    trees_present(
-        repo,
-        Some(tree(merge_base.detach())?),
-        Some(tree(tip)?),
-        Some(tree(base)?),
-    )
+    let (merge_base_tree, tip_tree) = (tree(merge_base)?, tree(tip)?);
+    let present = |commit: ObjectId| -> Result<bool> {
+        trees_present(
+            repo,
+            Some(merge_base_tree),
+            Some(tip_tree),
+            Some(tree(commit)?),
+        )
+    };
+    if present(base)? {
+        return Ok(true);
+    }
+    let mut commits = Vec::new();
+    let walk = repo
+        .rev_walk([base])
+        .with_hidden([merge_base])
+        .first_parent_only()
+        .all()?;
+    for info in walk.skip(1).take(SQUASH_SEARCH_LIMIT) {
+        commits.push(info?.id);
+    }
+    // Oldest first: a merge usually lands soon after the branch forked or
+    // last synced.
+    for commit in commits.into_iter().rev() {
+        if present(commit)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 type Entries = BTreeMap<BString, (EntryMode, ObjectId)>;

@@ -276,6 +276,33 @@ fn graph_answers_match_merge_base_and_rev_list() {
 }
 
 #[test]
+fn squash_merges_are_found_after_the_base_edits_their_paths() {
+    let env = Env::new();
+    let main = env.repo("project");
+    let base = env.git(&main, &["rev-parse", "HEAD"]);
+    env.git(&main, &["switch", "-q", "-c", "squashed"]);
+    env.commit(&main, "a", "1\n");
+    env.commit(&main, "dir/b", "2\n");
+    let squashed = env.git(&main, &["rev-parse", "HEAD"]);
+    env.git(&main, &["switch", "-q", "main"]);
+    env.git(&main, &["merge", "-q", "--squash", "squashed"]);
+    env.git(&main, &["commit", "-q", "-m", "squash"]);
+    env.commit(&main, "a", "reworked\n");
+    env.commit(&main, "c", "3\n");
+
+    env.git(&main, &["switch", "-q", "-c", "unmerged", &base]);
+    env.commit(&main, "a", "never merged\n");
+    let unmerged = env.git(&main, &["rev-parse", "HEAD"]);
+    env.git(&main, &["switch", "-q", "main"]);
+    let main_tip = env.git(&main, &["rev-parse", "HEAD"]);
+
+    let registry = env.registry();
+    let repo = registry.open(&env.common_dir(&main)).unwrap();
+    assert!(graph::changes_present(&repo, oid(&squashed), oid(&main_tip)).unwrap());
+    assert!(!graph::changes_present(&repo, oid(&unmerged), oid(&main_tip)).unwrap());
+}
+
+#[test]
 fn base_refs_follow_the_announcing_remote() {
     let env = Env::new();
     let upstream = env.repo("upstream");
