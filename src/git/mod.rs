@@ -1,5 +1,6 @@
 pub mod assess;
 pub mod cli;
+pub mod fetch;
 pub mod graph;
 pub mod head;
 pub mod inventory;

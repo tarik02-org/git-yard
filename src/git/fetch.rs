@@ -1,23 +1,24 @@
-//! Background fetches: supervised, tagged with their repository so a switch
-//! can stop the fetch of the repository it is about to change.
+//! Background fetches: supervised, tagged with their repository so a caller
+//! can stop the fetch of a repository it is about to change.
 
 use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use anyhow::Result;
 
-use crate::git::cli;
-use crate::git::process::Supervisor;
+use crate::core::ids::RepoKey;
 
-use super::listing::Project;
+use super::cli;
+use super::process::Supervisor;
 
 const TIMEOUT: Duration = Duration::from_secs(120);
 
-pub fn fetch(supervisor: &Supervisor, project: &Project) -> Result<()> {
+/// Fetches every remote of `repo`, running git in `dir`.
+pub fn fetch(supervisor: &Supervisor, dir: &Path, repo: &RepoKey) -> Result<()> {
     cli::ensure_version()?;
-    let mut command = cli::git(&project.main_path);
+    let mut command = cli::git(dir);
     command.args(["fetch", "--all", "--prune", "--quiet"]);
-    supervisor.run(command, &project.main_path, TIMEOUT, Some(&project.repo))?;
+    supervisor.run(command, dir, TIMEOUT, Some(repo))?;
     Ok(())
 }
 

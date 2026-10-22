@@ -33,6 +33,7 @@ pub trait Control {
     fn set_wanted(&self, keys: Vec<WorktreeKey>);
     fn set_measure_paused(&self, paused: bool);
     fn rescan(&self, repo: RepoKey);
+    fn fetch(&self, repo: RepoKey) -> bool;
     fn submit(&self, requests: Vec<Request>) -> Vec<WorktreeKey>;
     fn cancel(&self, key: &WorktreeKey) -> CancelResult;
     fn stop(&self);
@@ -50,6 +51,9 @@ impl Control for Engine {
     }
     fn rescan(&self, repo: RepoKey) {
         Engine::rescan(self, repo);
+    }
+    fn fetch(&self, repo: RepoKey) -> bool {
+        Engine::fetch(self, repo)
     }
     fn submit(&self, requests: Vec<Request>) -> Vec<WorktreeKey> {
         Engine::submit(self, requests)
@@ -287,6 +291,7 @@ impl<C: Control> GcApp<C> {
                 self.toast.say("selection reset");
             }
             KeyCode::Enter | KeyCode::Tab => self.details = !self.details,
+            KeyCode::Char('f') => self.fetch_focused(),
             KeyCode::Char('C') => self.compact(),
             KeyCode::Char('p') => self.toggle_measure_pause(),
             KeyCode::Char('?') => self.help = !self.help,
@@ -484,6 +489,27 @@ impl<C: Control> GcApp<C> {
         }
     }
 
+    fn fetch_focused(&mut self) {
+        let Some(key) = self.focused() else { return };
+        let label = self.repo_label(&key.repo());
+        if self.control.fetch(key.repo()) {
+            self.toast.say(format!("fetching {label}"));
+        } else {
+            self.toast.say(format!("already fetching {label}"));
+        }
+    }
+
+    fn repo_label(&self, repo: &RepoKey) -> String {
+        self.model
+            .rows
+            .values()
+            .find(|row| row.candidate.key().repo() == *repo)
+            .map_or_else(
+                || repo.to_string(),
+                |row| row.candidate.seed.repo_label.clone(),
+            )
+    }
+
     fn compact(&mut self) {
         let removed: Vec<WorktreeKey> = self
             .model
@@ -581,6 +607,13 @@ impl<C: Control> GcApp<C> {
     }
 
     pub fn apply(&mut self, event: Event) {
+        if let Event::Fetched { repo, error } = &event {
+            let label = self.repo_label(repo);
+            self.toast.say(match error {
+                None => format!("fetched {label}"),
+                Some(error) => format!("fetching {label} failed: {error}"),
+            });
+        }
         if let Some((key, outcome)) = self.model.apply(event) {
             if matches!(outcome, Outcome::Blocked { .. } | Outcome::Failed { .. }) {
                 // A retry needs fresh evidence.
@@ -661,6 +694,9 @@ mod tests {
         fn set_wanted(&self, _: Vec<WorktreeKey>) {}
         fn set_measure_paused(&self, _: bool) {}
         fn rescan(&self, _: RepoKey) {}
+        fn fetch(&self, _: RepoKey) -> bool {
+            true
+        }
         fn submit(&self, requests: Vec<Request>) -> Vec<WorktreeKey> {
             let keys = requests.iter().map(|request| request.key.clone()).collect();
             self.submitted.borrow_mut().extend(requests);
@@ -691,6 +727,7 @@ mod tests {
             git_activity: Some(0),
             registration_error: None,
             conflict: None,
+            fetched_at: None,
         }));
         app.apply(Event::Git {
             key: key.clone(),

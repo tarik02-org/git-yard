@@ -22,8 +22,10 @@ use crate::core::obs::Obs;
 use crate::fs::measure::measure;
 use crate::fs::walk::{FoundRepo, normalize_roots, walk};
 use crate::git::assess;
+use crate::git::fetch;
 use crate::git::inventory::inventory;
 use crate::git::open::Registry;
+use crate::git::process::Supervisor;
 use crate::removal::protocol::{self, Context};
 use crate::removal::request::{Outcome, Request};
 use crate::store::journal::Journal;
@@ -55,6 +57,11 @@ pub enum Event {
     Removal {
         key: WorktreeKey,
         state: RemovalState,
+    },
+    /// A fetch finished; on success the repository is re-read.
+    Fetched {
+        repo: RepoKey,
+        error: Option<String>,
     },
 }
 
@@ -124,6 +131,8 @@ struct Shared {
     walk_pool: Arc<ThreadPool>,
     discovering: AtomicBool,
     assessing: AtomicUsize,
+    supervisor: Supervisor,
+    fetching: Mutex<HashSet<RepoKey>>,
 }
 
 impl Shared {
@@ -138,6 +147,20 @@ impl Shared {
     fn stopping(&self) -> bool {
         self.stopped.load(Ordering::Relaxed)
     }
+
+    fn fetching(&self) -> MutexGuard<'_, HashSet<RepoKey>> {
+        self.fetching.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+}
+
+fn rescan(shared: &Shared, repo: &RepoKey, assess_tx: &Sender<Seed>) {
+    let roots = normalize_roots(&shared.config.roots);
+    let found = FoundRepo {
+        common_dir: repo.path().to_path_buf(),
+        root: roots.first().cloned().unwrap_or_default(),
+    };
+    shared.services.registry.forget(repo.path());
+    inventory_repo(shared, &found, &roots, assess_tx);
 }
 
 pub struct Engine {
@@ -174,6 +197,8 @@ impl Engine {
             ),
             discovering: AtomicBool::new(true),
             assessing: AtomicUsize::new(0),
+            supervisor: Supervisor::default(),
+            fetching: Mutex::default(),
         });
         if !cached.is_empty() {
             shared.send(Event::Cached(cached));
@@ -234,15 +259,31 @@ impl Engine {
     /// Re-reads one repository, for example after a removal was blocked.
     pub fn rescan(&self, repo: RepoKey) {
         let (shared, assess_tx) = (self.shared.clone(), self.assess_tx.clone());
+        thread::spawn(move || rescan(&shared, &repo, &assess_tx));
+    }
+
+    /// Fetches every remote of `repo`, then re-reads it. Returns false when
+    /// a fetch of it is already running.
+    pub fn fetch(&self, repo: RepoKey) -> bool {
+        if !self.shared.fetching().insert(repo.clone()) {
+            return false;
+        }
+        let (shared, assess_tx) = (self.shared.clone(), self.assess_tx.clone());
         thread::spawn(move || {
-            let roots = normalize_roots(&shared.config.roots);
-            let found = FoundRepo {
-                common_dir: repo.path().to_path_buf(),
-                root: roots.first().cloned().unwrap_or_default(),
-            };
-            shared.services.registry.forget(repo.path());
-            inventory_repo(&shared, &found, &roots, &assess_tx);
+            let error = fetch::fetch(&shared.supervisor, repo.path(), &repo)
+                .err()
+                .map(|error| format!("{error:#}"));
+            shared.fetching().remove(&repo);
+            let fetched = error.is_none();
+            shared.send(Event::Fetched {
+                repo: repo.clone(),
+                error,
+            });
+            if fetched && !shared.stopping() {
+                rescan(&shared, &repo, &assess_tx);
+            }
         });
+        true
     }
 
     /// Queues requests; returns the keys accepted. Rows already queued or
@@ -286,6 +327,7 @@ impl Engine {
         self.shared.reads.cancel();
         self.shared.measure.close();
         self.shared.gate.update(|gate| gate.stopped = true);
+        self.shared.supervisor.shutdown();
     }
 
     /// Stops and waits until running removals reach a journaled end.

@@ -32,6 +32,9 @@ pub struct Seed {
     pub registration_error: Option<String>,
     /// Another registration resolves to the same directory.
     pub conflict: Option<String>,
+    /// Last fetch into the repository, from `FETCH_HEAD`.
+    #[serde(default)]
+    pub fetched_at: Option<Timestamp>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]

@@ -13,11 +13,11 @@ use crossbeam_channel::{Receiver, Sender, bounded, unbounded};
 use crate::core::config::Config;
 use crate::core::ids::{RepoKey, now};
 use crate::fs::walk::{FoundRepo, normalize_roots, walk};
+use crate::git::fetch::{self as fetching, fetched_within};
 use crate::git::open::Registry;
 use crate::git::process::Supervisor;
 use crate::git::remote::project_forge;
 
-use super::fetch::{self as fetching, fetched_within};
 use super::forge::{self, Requests};
 use super::listing::{Listing, Project, list_project};
 
@@ -131,9 +131,10 @@ impl Engine {
             thread::spawn(move || {
                 let shared = fetch_shared;
                 for project in fetch_rx {
-                    let error = fetching::fetch(&shared.supervisor, &project)
-                        .err()
-                        .map(|error| format!("{error:#}"));
+                    let error =
+                        fetching::fetch(&shared.supervisor, &project.main_path, &project.repo)
+                            .err()
+                            .map(|error| format!("{error:#}"));
                     let fetched = error.is_none();
                     shared.send(Event::Fetched {
                         repo: project.repo.clone(),

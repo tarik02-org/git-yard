@@ -166,6 +166,8 @@ impl Model {
                     self.selection.remove(&key);
                 }
             }
+            // Its re-read arrives as fresh seeds.
+            Event::Fetched { .. } => {}
             Event::Removal { key, state } => {
                 if let Some(row) = self.rows.get_mut(&key) {
                     let finished = match &state {
@@ -320,6 +322,7 @@ mod tests {
             git_activity: None,
             registration_error: None,
             conflict: None,
+            fetched_at: None,
         }
     }
 

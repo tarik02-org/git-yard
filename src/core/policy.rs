@@ -8,12 +8,15 @@ use serde::Serialize;
 
 use super::candidate::{Candidate, Kind};
 use super::config::Config;
-use super::facts::{DirState, EntryKind, Integration, StorageFacts};
+use super::facts::{DirState, EntryKind, GitFacts, Integration, StorageFacts};
 use super::format::{ago, size};
 use super::ids::Timestamp;
 use super::obs::Obs;
 
 const DAY: f64 = 86_400.0;
+
+/// A base fetched longer ago than this may be missing recent merges.
+const FETCH_STALE_AFTER: i64 = 86_400;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "reason", content = "detail", rename_all = "kebab-case")]
@@ -177,6 +180,20 @@ pub fn recommend(candidate: &Candidate, config: &Config, now: Timestamp) -> Reco
     }
     match &git.integration {
         Integration::Merged { .. } | Integration::ChangesPresent { .. } => {}
+        Integration::NotIntegrated { .. } => {
+            let mut reason = git.integration.describe();
+            let stale = match last_fetch(candidate, git) {
+                Some(None) => Some("never fetched".to_owned()),
+                Some(Some(fetched)) if now - fetched > FETCH_STALE_AFTER => {
+                    Some(format!("last fetched {}", ago(now - fetched)))
+                }
+                _ => None,
+            };
+            if let Some(stale) = stale {
+                reason.push_str(&format!(" ({stale})"));
+            }
+            reasons.push(reason);
+        }
         other => reasons.push(other.describe()),
     }
     if let Some(status) = git.status
@@ -214,6 +231,15 @@ pub fn recommend(candidate: &Candidate, config: &Config, now: Timestamp) -> Reco
         recommended: reasons.is_empty(),
         reasons,
     }
+}
+
+/// When the remote the bases track was last fetched: `None` without a
+/// remote base, `Some(None)` when it never was.
+pub fn last_fetch(candidate: &Candidate, git: &GitFacts) -> Option<Option<Timestamp>> {
+    git.bases
+        .iter()
+        .any(|base| base.name != base.branch)
+        .then_some(candidate.seed.fetched_at)
 }
 
 fn storage_reasons(facts: &StorageFacts) -> Vec<String> {

@@ -11,6 +11,7 @@ use crate::core::facts::{DirState, Integration};
 use crate::core::format::{self, truncate_end, truncate_middle};
 use crate::core::ids::WorktreeKey;
 use crate::core::obs::Obs;
+use crate::core::policy;
 use crate::removal::request::Outcome;
 use crate::scan::engine::RemovalState;
 use crate::scan::model::Row;
@@ -566,7 +567,7 @@ impl<C: Control> GcApp<C> {
         }
 
         let keys = if self.help {
-            "j/k move · J/K line · = line here · space check · D delete checked · xx delete now · c cancel · / filter · a show all · r rerank · R reset · ⏎ details · C hide removed · p pause sizes · q quit · mouse: click row, click box to check, drag line, wheel"
+            "j/k move · J/K line · = line here · space check · D delete checked · xx delete now · c cancel · / filter · a show all · r rerank · R reset · ⏎ details · f fetch repo · C hide removed · p pause sizes · q quit · mouse: click row, click box to check, drag line, wheel"
         } else {
             "space check · J/K line · D delete checked · xx delete now · / filter · a show all · ⏎ details · ? keys · q quit"
         };
@@ -654,6 +655,14 @@ fn details(row: &Row, now: i64) -> Vec<Line<'static>> {
                 "integration: {}",
                 value.integration.describe()
             )));
+            match policy::last_fetch(candidate, value) {
+                Some(Some(fetched)) => lines.push(Line::from(format!(
+                    "base last fetched {}",
+                    format::ago(now - fetched)
+                ))),
+                Some(None) => lines.push(Line::from("base never fetched")),
+                None => {}
+            }
             lines.push(Line::from(format!(
                 "last commit {}",
                 age(value.last_commit)

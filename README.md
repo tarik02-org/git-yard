@@ -80,13 +80,14 @@ Without a search the picker shows worktrees, base branches and recent picks; a s
 | r / R | rerank / reset the line and choices |
 | a | also show main worktrees and blocked rows |
 | Enter, Tab | details |
+| f | fetch the focused row's repository and re-read it |
 | C | hide removed rows |
 | p | pause size measurement |
 | ? | all keys |
 | q, Ctrl-C | quit; with removals running, wait for them (press again to force) |
 | drag the line | move the line |
 
-Recommended rows (merged or squashed, clean, not protected, stale) above the line start checked; the line first sits below the top `batch_size` of them so a batch stays reviewable however long the list is, and moves with the ranking until you act on the list. Any removable row can be checked on either side. Main worktrees and blocked rows are hidden until `a`. A choice you make about a row lapses when its facts change (a new commit, edited files), so nothing is removed on stale evidence.
+Recommended rows (merged or squashed, clean, not protected, stale) above the line start checked; the line first sits below the top `batch_size` of them so a batch stays reviewable however long the list is, and moves with the ranking until you act on the list. Any removable row can be checked on either side. Merges are judged against the base branches as last fetched; `gc` itself never fetches unless you press `f`. Main worktrees and blocked rows are hidden until `a`. A choice you make about a row lapses when its facts change (a new commit, edited files), so nothing is removed on stale evidence.
 
 ## What removal does
 

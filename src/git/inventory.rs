@@ -39,6 +39,10 @@ pub fn inventory(
         _ => common.clone(),
     };
     let label = label(&main_path, &found.root, roots);
+    let fetched_at = fs::metadata(common.join("FETCH_HEAD"))
+        .and_then(|meta| meta.modified())
+        .ok()
+        .map(to_timestamp);
 
     let mut seeds = vec![Seed {
         key: WorktreeKey::main(&key),
@@ -55,6 +59,7 @@ pub fn inventory(
         git_activity: git_activity(&common),
         registration_error: None,
         conflict: None,
+        fetched_at,
     }];
 
     let mut ids: Vec<_> = match fs::read_dir(common.join("worktrees")) {
@@ -97,6 +102,7 @@ pub fn inventory(
             dir,
             registration_error,
             conflict,
+            fetched_at,
         });
     }
     mark_shared_directories(&mut seeds);
