@@ -3,7 +3,7 @@
 //! terminal on drop, on a UI-thread panic, and before re-raising signals.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, IsTerminal, Write};
+use std::io::{self, BufWriter, IsTerminal, Write};
 use std::panic::{self, PanicHookInfo};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -17,7 +17,8 @@ use ratatui::crossterm::cursor::Show;
 use ratatui::crossterm::event::{self, DisableMouseCapture, EnableMouseCapture, Event};
 use ratatui::crossterm::execute;
 use ratatui::crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    EndSynchronizedUpdate, EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode,
+    enable_raw_mode,
 };
 use signal_hook::consts::{SIGHUP, SIGINT, SIGTERM};
 use signal_hook::iterator::Signals;
@@ -26,7 +27,9 @@ use crate::core::error::Error;
 
 type PanicHook = dyn Fn(&PanicHookInfo<'_>) + Send + Sync + 'static;
 
-pub type Backend = CrosstermBackend<File>;
+/// Buffered so a frame leaves in one write instead of one per escape
+/// sequence; terminal multiplexers otherwise show it half-drawn.
+pub type Backend = CrosstermBackend<BufWriter<File>>;
 
 /// Panic messages from other threads while the screen is ours; printing
 /// them would scribble over the UI.
@@ -57,7 +60,7 @@ pub fn open(command: &str) -> Result<Session, Error> {
         enable_raw_mode()?;
         let mut output = tty.try_clone()?;
         execute!(output, EnterAlternateScreen, EnableMouseCapture)?;
-        Terminal::new(CrosstermBackend::new(output))
+        Terminal::new(CrosstermBackend::new(BufWriter::new(output)))
     };
     // No clear(): crossterm asks for the cursor position on stdout, which
     // may be a pipe; the alternate screen starts blank anyway.
@@ -79,7 +82,14 @@ pub fn open(command: &str) -> Result<Session, Error> {
 
 fn restore() {
     if let Ok(mut tty) = OpenOptions::new().write(true).open("/dev/tty") {
-        let _ = execute!(tty, DisableMouseCapture, LeaveAlternateScreen, Show);
+        // A panic mid-frame would leave the terminal holding back output.
+        let _ = execute!(
+            tty,
+            EndSynchronizedUpdate,
+            DisableMouseCapture,
+            LeaveAlternateScreen,
+            Show
+        );
         let _ = tty.flush();
     }
     let _ = disable_raw_mode();

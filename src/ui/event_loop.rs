@@ -7,6 +7,8 @@ use anyhow::{Context, Result};
 use crossbeam_channel::{Receiver, select, tick};
 use ratatui::Frame;
 use ratatui::crossterm::event::{Event as TermEvent, KeyEventKind};
+use ratatui::crossterm::terminal::{BeginSynchronizedUpdate, EndSynchronizedUpdate};
+use ratatui::crossterm::{execute, queue};
 
 use super::terminal::{Input, Session};
 
@@ -65,7 +67,10 @@ pub fn run<A: App>(
     loop {
         if dirty && last_draw.elapsed() >= FRAME {
             app.settle();
+            // The terminal shows the frame only once it is complete.
+            queue!(session.terminal.backend_mut(), BeginSynchronizedUpdate)?;
             session.terminal.draw(|frame| app.draw(frame))?;
+            execute!(session.terminal.backend_mut(), EndSynchronizedUpdate)?;
             last_draw = Instant::now();
             dirty = false;
         }
