@@ -144,12 +144,7 @@ fn wt_switch(
     if !output.status.success() {
         bail!("wt switch {} failed ({})", args.join(" "), output.status);
     }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let line = text
-        .lines()
-        .rfind(|line| line.trim_start().starts_with('{'))
-        .ok_or_else(|| anyhow!("wt printed no result"))?;
-    serde_json::from_str(line).context("decoding wt result")
+    serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).context("decoding wt result")
 }
 
 /// The local branch a remote branch opens as: its own name, or
