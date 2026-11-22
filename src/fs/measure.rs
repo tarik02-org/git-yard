@@ -23,7 +23,8 @@ struct Seen {
 }
 
 /// Per-entry state from the parallel readers: own metadata (never following
-/// symlinks), and whether the directory is a nested repository.
+/// symlinks), and whether the directory is a nested repository. A `.git`
+/// file only points elsewhere, as a submodule's does, so it is not one.
 type Walk = WalkDirGeneric<((), (Option<fs::Metadata>, Seen))>;
 
 /// Walks `root` on `pool` without following symlinks or crossing mounts.
@@ -86,8 +87,6 @@ pub fn measure(
                             && path.join("objects").is_dir()
                             && path.join("refs").is_dir();
                     }
-                } else if entry.file_name == ".git" {
-                    seen.nested_repo = true;
                 }
                 entry.client_state = (meta, seen);
             }
@@ -171,6 +170,8 @@ mod tests {
         fs::write(outside.path().join("big"), vec![0u8; 100_000]).unwrap();
         std::os::unix::fs::symlink(outside.path(), root.join("link")).unwrap();
         fs::create_dir_all(root.join("vendor/lib/.git")).unwrap();
+        fs::create_dir(root.join("submodule")).unwrap();
+        fs::write(root.join("submodule/.git"), "gitdir: elsewhere\n").unwrap();
 
         let facts = measure(root, &pool(), |_| {}, || true, || {})
             .unwrap()

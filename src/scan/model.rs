@@ -122,14 +122,9 @@ impl Model {
                 self.touch(&key);
                 self.mark_first_candidate();
             }
-            Event::Git {
-                key,
-                observation,
-                watermark,
-            } => {
+            Event::Git { key, observation } => {
                 if let Some(row) = self.rows.get_mut(&key) {
                     row.candidate.git = observation;
-                    row.candidate.watermark = watermark;
                     self.touch(&key);
                 }
             }
@@ -342,12 +337,10 @@ mod tests {
                     status: None,
                     unreachable_commits: false,
                     in_progress: None,
-                    private_modules: false,
                     bases: vec![],
                 },
                 observed_at: 0,
             },
-            watermark: Some(0),
         });
         model.apply(Event::Storage {
             key: key.clone(),

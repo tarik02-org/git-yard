@@ -25,7 +25,6 @@ pub(crate) fn load_cache(session: &Session) -> Vec<Candidate> {
     for candidate in &mut candidates {
         candidate.git = std::mem::replace(&mut candidate.git, Obs::Pending).into_stale();
         candidate.storage = std::mem::replace(&mut candidate.storage, Obs::Pending).into_stale();
-        candidate.watermark = None;
     }
     candidates
 }

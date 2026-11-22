@@ -42,10 +42,6 @@ pub struct Candidate {
     pub seed: Seed,
     pub git: Obs<GitFacts>,
     pub storage: Obs<StorageFacts>,
-    /// When the current git observation started, in nanoseconds: anything
-    /// changed at or after it is not covered by the evidence.
-    #[serde(default)]
-    pub watermark: Option<i64>,
 }
 
 impl Candidate {
@@ -54,7 +50,6 @@ impl Candidate {
             seed,
             git: Obs::Pending,
             storage: Obs::Pending,
-            watermark: None,
         }
     }
 

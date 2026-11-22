@@ -28,7 +28,6 @@ use crate::git::open::Registry;
 use crate::git::process::Supervisor;
 use crate::removal::protocol::{self, Context};
 use crate::removal::request::{Outcome, Request};
-use crate::store::journal::Journal;
 use crate::store::lock::RepoLocks;
 
 use super::cancel::CancelToken;
@@ -40,7 +39,6 @@ pub enum Event {
     Git {
         key: WorktreeKey,
         observation: Obs<GitFacts>,
-        watermark: Option<i64>,
     },
     Storage {
         key: WorktreeKey,
@@ -104,7 +102,6 @@ pub enum CancelResult {
 #[derive(Clone)]
 pub struct Services {
     pub registry: Arc<Registry>,
-    pub journal: Arc<Journal>,
     pub locks: Arc<RepoLocks>,
 }
 
@@ -330,7 +327,7 @@ impl Engine {
         self.shared.supervisor.shutdown();
     }
 
-    /// Stops and waits until running removals reach a journaled end.
+    /// Stops and waits until running removals finish.
     pub fn shutdown(mut self) {
         self.stop();
         self.delete_tx = None;
@@ -449,33 +446,23 @@ fn assess_worker(shared: &Shared, seeds: &Receiver<Seed>) {
             assess::observe(&repo, &seed, token.flag())
         }));
         shared.assessing.fetch_sub(1, Ordering::Relaxed);
-        let (observation, watermark) = match result {
-            Ok(Ok(Some((value, watermark)))) => (
-                Obs::Complete {
-                    value,
-                    observed_at: now(),
-                },
-                Some(watermark),
-            ),
+        let observation = match result {
+            Ok(Ok(Some(value))) => Obs::Complete {
+                value,
+                observed_at: now(),
+            },
             // Cancelled: no observation at all.
             Ok(Ok(None)) => continue,
-            Ok(Err(error)) => (
-                Obs::Failed {
-                    error: format!("{error:#}"),
-                },
-                None,
-            ),
-            Err(panic) => (
-                Obs::Failed {
-                    error: format!("panicked: {}", panic_message(panic.as_ref())),
-                },
-                None,
-            ),
+            Ok(Err(error)) => Obs::Failed {
+                error: format!("{error:#}"),
+            },
+            Err(panic) => Obs::Failed {
+                error: format!("panicked: {}", panic_message(panic.as_ref())),
+            },
         };
         shared.send(Event::Git {
             key: seed.key,
             observation,
-            watermark,
         });
     }
 }
@@ -559,21 +546,14 @@ fn remove_one(shared: &Shared, request: Request) {
         let services = &shared.services;
         let context = Context {
             registry: &services.registry,
-            journal: &services.journal,
             locks: &services.locks,
             cancelled: &cancelled,
             on_removing: &on_removing,
-            probe: &protocol::no_probe,
         };
         match catch_unwind(AssertUnwindSafe(|| protocol::remove(&context, &request))) {
-            Ok(Some(outcome)) => outcome,
-            Ok(None) => unreachable!("no crash probe is installed"),
+            Ok(outcome) => outcome,
             Err(panic) => Outcome::Failed {
-                reason: format!(
-                    "panicked: {}; run `git-yard journal` to recover",
-                    panic_message(panic.as_ref())
-                ),
-                quarantine: None,
+                reason: format!("panicked: {}", panic_message(panic.as_ref())),
             },
         }
     };

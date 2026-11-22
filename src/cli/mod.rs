@@ -2,7 +2,6 @@
 
 mod exit;
 mod gc;
-mod journal;
 mod list;
 mod output;
 mod pick;
@@ -19,7 +18,6 @@ use crate::core::config::Config;
 use crate::core::error::Error;
 use crate::git::open::{GitContext, Registry};
 use crate::scan::engine::Services;
-use crate::store::journal::Journal;
 use crate::store::locations::Locations;
 use crate::store::lock::RepoLocks;
 
@@ -88,11 +86,6 @@ enum Command {
         #[arg(last = true)]
         command: Vec<String>,
     },
-    /// Recover and report removals interrupted by a crash or shutdown.
-    Journal {
-        #[arg(long)]
-        json: bool,
-    },
 }
 
 /// What every command shares.
@@ -123,7 +116,6 @@ impl Session {
     pub fn services(&self) -> Result<Services> {
         Ok(Services {
             registry: Arc::new(Registry::new(GitContext::default())),
-            journal: Arc::new(Journal::open(&self.locations.journal_file)?),
             locks: Arc::new(RepoLocks::new(&self.locations.lock_dir)),
         })
     }
@@ -217,7 +209,6 @@ fn dispatch(cli: Cli) -> Result<ExitCode> {
             json,
             command,
         ),
-        Command::Journal { json } => journal::run(&Session::new(config, cli.no_cache, &[])?, json),
     }
 }
 

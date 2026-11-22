@@ -497,7 +497,7 @@ fn shallow_partial_and_split_index_repositories_assess() {
 }
 
 #[test]
-fn worktree_submodules_are_private_storage() {
+fn submodule_changes_make_the_worktree_dirty() {
     let env = Env::new();
     let library = env.repo("library");
     let main = env.repo("project");
@@ -529,9 +529,17 @@ fn worktree_submodules_are_private_storage() {
 
     let registry = env.registry();
     let (repo, inventory) = env.inventory(&registry, &main);
-    let facts = facts(&repo, seed_at(&inventory.seeds, &wt));
-    assert!(facts.private_modules);
-    assert!(facts.status.unwrap().is_clean(), "{:?}", facts.status);
+    let clean = facts(&repo, seed_at(&inventory.seeds, &wt)).status.unwrap();
+    assert!(clean.is_clean(), "{clean:?}");
+
+    fs::write(wt.join("lib/scratch"), "x").unwrap();
+    let untracked = facts(&repo, seed_at(&inventory.seeds, &wt)).status.unwrap();
+    assert_eq!(untracked.changed, 1, "{untracked:?}");
+
+    env.commit(&wt.join("lib"), "scratch", "y");
+    let moved = facts(&repo, seed_at(&inventory.seeds, &wt)).status.unwrap();
+    assert_eq!(moved.changed, 1, "{moved:?}");
+    assert_ne!(moved.hash, untracked.hash);
 }
 
 #[test]

@@ -138,7 +138,7 @@ impl Integration {
 }
 
 /// Working-tree status. Ignored files are counted but not hashed: they are
-/// covered by the ctime watermark at removal time instead.
+/// deleted with the worktree, as `git clean -X` would.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct StatusEvidence {
     pub changed: usize,
@@ -217,9 +217,6 @@ pub struct GitFacts {
     /// Detached HEAD with commits no reference or other worktree reaches.
     pub unreachable_commits: bool,
     pub in_progress: Option<InProgress>,
-    /// `<admin>/modules` exists: private submodule repositories that pruning
-    /// the registration would destroy.
-    pub private_modules: bool,
     /// The bases integration was measured against, for revalidation.
     pub bases: Vec<BaseRef>,
 }
@@ -236,7 +233,7 @@ pub struct StorageFacts {
     pub newest_mtime: Option<Timestamp>,
     /// Directories on another filesystem.
     pub mounts: u64,
-    /// Nested `.git` entries or bare repositories below the root.
+    /// Nested `.git` directories or bare repositories below the root.
     pub nested_repos: u64,
     pub errors: u64,
 }

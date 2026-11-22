@@ -189,24 +189,14 @@ const SCROLL_PADDING: usize = 3;
 
 impl<C: Control> GcApp<C> {
     fn draw_view(&mut self, frame: &mut Frame) {
-        let notice_height = self.notices.len().min(3) as u16;
-        let [header, notices, body, footer] = Layout::vertical([
+        let [header, body, footer] = Layout::vertical([
             Constraint::Length(1),
-            Constraint::Length(notice_height),
             Constraint::Min(3),
             Constraint::Length(2),
         ])
         .areas(frame.area());
 
         frame.render_widget(Paragraph::new(self.header_line()), header);
-        if notice_height > 0 {
-            let lines: Vec<Line> = self
-                .notices
-                .iter()
-                .map(|notice| Line::from(format!("! {notice}")).yellow())
-                .collect();
-            frame.render_widget(Paragraph::new(lines), notices);
-        }
 
         let visible = self.visible();
         let focus = self.focused_in(&visible);
