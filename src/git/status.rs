@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use gix::status::plumbing::index_as_worktree::EntryStatus;
+use gix::status::plumbing::index_as_worktree::{Change, EntryStatus};
 use gix::status::{Item, Submodule, UntrackedFiles, index_worktree};
 
 use crate::core::facts::StatusEvidence;
@@ -18,6 +18,9 @@ use crate::core::facts::StatusEvidence;
 enum Detail {
     Staged(String),
     Changed,
+    /// A submodule whose HEAD moved or whose own status is not clean: its
+    /// HEAD and the paths it reports changed.
+    Submodule(String),
     Conflicted(String),
     Untracked,
 }
@@ -56,6 +59,19 @@ pub fn worktree_status(
             Item::IndexWorktree(index_worktree::Item::Modification { status, .. }) => {
                 match status {
                     EntryStatus::Conflict { .. } => Some(Detail::Conflicted(format!("{status:?}"))),
+                    EntryStatus::Change(Change::SubmoduleModification(submodule)) => {
+                        let mut paths: Vec<String> = submodule
+                            .changes
+                            .iter()
+                            .flatten()
+                            .map(|change| change.location().to_string())
+                            .collect();
+                        paths.sort();
+                        Some(Detail::Submodule(format!(
+                            "{:?} {paths:?}",
+                            submodule.checked_out_head_id
+                        )))
+                    }
                     EntryStatus::Change(_) | EntryStatus::IntentToAdd => Some(Detail::Changed),
                     // Only stat data differs; the content is unchanged.
                     EntryStatus::NeedsUpdate(_) => None,
@@ -107,6 +123,11 @@ pub fn worktree_status(
                 evidence.changed += 1;
                 hash_field(&mut hash, b"changed");
                 hash_content(&mut hash, &path)?;
+            }
+            Detail::Submodule(state) => {
+                evidence.changed += 1;
+                hash_field(&mut hash, b"submodule");
+                hash_field(&mut hash, state.as_bytes());
             }
             Detail::Untracked => {
                 evidence.untracked += 1;

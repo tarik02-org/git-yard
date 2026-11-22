@@ -2,7 +2,7 @@
 
 use std::fs;
 use std::io::ErrorKind;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::MetadataExt;
 use std::path::Path;
 
 use crate::core::facts::{DirState, EntryKind};
@@ -39,14 +39,6 @@ pub fn dir_state(path: &Path) -> DirState {
         }
         Err(_) => DirState::Unreadable,
     }
-}
-
-/// Whether `file_type` is something removal refuses to touch.
-pub fn is_special(file_type: &fs::FileType) -> bool {
-    file_type.is_fifo()
-        || file_type.is_socket()
-        || file_type.is_block_device()
-        || file_type.is_char_device()
 }
 
 #[cfg(test)]

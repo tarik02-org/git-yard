@@ -212,7 +212,7 @@ pub fn candidate(
         .into_iter()
         .find(|seed| seed.path.as_path() == path)
         .unwrap_or_else(|| panic!("no registration at {}", path.display()));
-    let (facts, watermark) = git_yard::git::assess::observe(
+    let facts = git_yard::git::assess::observe(
         &repo,
         &seed,
         std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
@@ -226,6 +226,5 @@ pub fn candidate(
             observed_at: 0,
         },
         storage: Obs::Pending,
-        watermark: Some(watermark),
     }
 }

@@ -16,8 +16,7 @@ use crate::fs::paths::canonicalize_allow_missing_leaf;
 use crate::fs::walk::{FoundRepo, normalize_roots, read_gitdir_file, walk};
 use crate::git::assess::observe;
 use crate::git::inventory::inventory;
-use crate::removal::protocol::{Context, no_probe, remove};
-use crate::removal::reconcile::reconcile;
+use crate::removal::protocol::{Context, remove};
 use crate::removal::request::{Outcome, Request};
 use crate::scan::engine::Services;
 
@@ -39,10 +38,6 @@ pub(crate) fn run(
 ) -> Result<ExitCode> {
     let services = session.services()?;
     let signals = Signals::install()?;
-    let (recoveries, _) = reconcile(&services.journal, &services.locks)?;
-    for recovery in &recoveries {
-        eprintln!("git-yard: {}", recovery.describe());
-    }
 
     let mut results = Vec::new();
     for path in paths {
@@ -56,13 +51,11 @@ pub(crate) fn run(
                     let cancelled = || signals.received().is_some();
                     let context = Context {
                         registry: &services.registry,
-                        journal: &services.journal,
                         locks: &services.locks,
                         cancelled: &cancelled,
                         on_removing: &|| {},
-                        probe: &no_probe,
                     };
-                    remove(&context, &request).expect("no crash probe is installed")
+                    remove(&context, &request)
                 }
                 Err(reason) => Outcome::Blocked {
                     reason: format!("{reason:#}"),
@@ -80,9 +73,7 @@ pub(crate) fn run(
     if json {
         println!("{}", serde_json::to_string_pretty(&results)?);
     }
-    let all_done = results
-        .iter()
-        .all(|result| result.outcome.is_clean_success());
+    let all_done = results.iter().all(|result| result.outcome.is_removed());
     Ok(signals.finish(exit::code(if all_done { exit::OK } else { exit::PARTIAL })))
 }
 
@@ -95,7 +86,7 @@ fn prepare(
     allow_dirty: bool,
 ) -> Result<Request> {
     let (repo, seed) = find_registration(session, services, target)?;
-    let (facts, watermark) = observe(&repo, &seed, Arc::new(AtomicBool::new(false)))?
+    let facts = observe(&repo, &seed, Arc::new(AtomicBool::new(false)))?
         .ok_or_else(|| anyhow!("assessment interrupted"))?;
     let dirty = facts.status.is_some_and(|status| !status.is_clean());
     let candidate = Candidate {
@@ -105,7 +96,6 @@ fn prepare(
             observed_at: now(),
         },
         storage: Obs::Pending,
-        watermark: Some(watermark),
     };
     if let Err(block) = eligibility(&candidate) {
         bail!("{block}");

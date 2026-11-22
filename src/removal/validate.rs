@@ -91,7 +91,7 @@ pub fn validate(registry: &Registry, request: &Request) -> Result<Candidate, Val
     if seed.dir != request.dir {
         return Err(blocked("directory changed since assessment".into()));
     }
-    let (facts, watermark) = assess::observe(&repo, &seed, Arc::new(AtomicBool::new(false)))
+    let facts = assess::observe(&repo, &seed, Arc::new(AtomicBool::new(false)))
         .map_err(|error| blocked(format!("reassessing: {error:#}")))?
         .ok_or_else(|| blocked("reassessment interrupted".into()))?;
     let candidate = Candidate {
@@ -101,7 +101,6 @@ pub fn validate(registry: &Registry, request: &Request) -> Result<Candidate, Val
             observed_at: crate::core::ids::now(),
         },
         storage: Obs::Pending,
-        watermark: Some(watermark),
     };
     eligibility(&candidate).map_err(|block| blocked(block.to_string()))?;
     if candidate.revision() != request.revision {

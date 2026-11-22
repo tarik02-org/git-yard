@@ -39,7 +39,6 @@ git-yard pick --json            # print the selection without switching
 git-yard gc ~/work              # cleanup UI
 git-yard list --json ~/work     # every candidate with its facts and rating
 git-yard remove ../app.old-fix  # revalidate and remove by path
-git-yard journal                # recover interrupted removals
 git-yard completions zsh        # also bash, fish, elvish, powershell
 ```
 
@@ -91,11 +90,11 @@ Recommended rows (merged or squashed, clean, not protected, stale) above the lin
 
 ## What removal does
 
-Main worktrees and bare repositories are never removed, and branches are always kept. A linked worktree is blocked while it is locked, has an operation in progress, holds private submodule repositories, has a detached HEAD with commits nothing else reaches, shares its directory with another registration, or its path is a symlink, a file, or sits on a missing (unmounted) parent. Dirty worktrees are removable but never pre-checked.
+Main worktrees and bare repositories are never removed, and branches are always kept. A linked worktree is blocked while it is locked, has an operation in progress, has a detached HEAD with commits nothing else reaches, shares its directory with another registration, or its path is a symlink, a file, or sits on a missing (unmounted) parent. Dirty worktrees are removable but never pre-checked.
 
-Each removal is checked again against what you saw, then the directory is moved aside with an atomic rename and inspected there: it is put back if it contains another repository, a mount, a special file, or anything changed after the assessment. Only after `git worktree remove` has dropped the registration are the files deleted. Every step is journaled; after a crash, `git-yard journal` (or the next `gc`/`remove`) puts directories back where it safely can and names any it leaves for you.
+Each removal is checked again against what you saw (HEAD, the bases, and every changed or untracked file, including inside submodules) and refused if anything moved or if a filesystem is mounted inside the worktree. Then `git worktree remove --force` deletes it.
 
-**Files ignored by `.gitignore` (build output, `node_modules`, local `.env` files) are deleted with the worktree.** They are counted in the details pane but not otherwise protected.
+**Files ignored by `.gitignore` (build output, `node_modules`, local `.env` files, ignored nested repositories) are deleted with the worktree, as `git clean -X` would.** They are counted in the details pane but not otherwise protected.
 
 ## Configuration
 
@@ -124,7 +123,7 @@ request_minutes = 5
 jobs = 4
 ```
 
-`post_create` receives `GIT_YARD_PATH` and `GIT_YARD_BRANCH` in its environment. Caches and the removal journal live in the platform's cache and state directories under `git-yard`.
+`post_create` receives `GIT_YARD_PATH` and `GIT_YARD_BRANCH` in its environment. Caches and lock files live in the platform's cache and state directories under `git-yard`.
 
 ## License
 

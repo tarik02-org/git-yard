@@ -34,7 +34,6 @@ pub enum Block {
     Pending,
     AssessmentFailed(String),
     UnreachableCommits,
-    PrivateSubmodules,
     InProgress(&'static str),
     /// The directory is gone but its index has staged changes.
     StagedWithoutDirectory,
@@ -64,9 +63,6 @@ impl fmt::Display for Block {
             Block::Pending => write!(f, "assessing"),
             Block::AssessmentFailed(error) => write!(f, "assessment failed: {error}"),
             Block::UnreachableCommits => write!(f, "detached with unreachable commits"),
-            Block::PrivateSubmodules => {
-                write!(f, "registration holds private submodule repositories")
-            }
             Block::InProgress(operation) => write!(f, "{operation} in progress"),
             Block::StagedWithoutDirectory => {
                 write!(f, "directory missing but the index has staged changes")
@@ -94,7 +90,6 @@ impl Block {
             Block::Pending => "assessing",
             Block::AssessmentFailed(_) => "failed",
             Block::UnreachableCommits => "unreachable",
-            Block::PrivateSubmodules => "submodules",
             Block::InProgress(operation) => operation,
             Block::StagedWithoutDirectory => "staged",
         }
@@ -133,9 +128,6 @@ pub fn eligibility(candidate: &Candidate) -> Result<(), Block> {
         Obs::Failed { error } => return Err(Block::AssessmentFailed(error.clone())),
         Obs::Pending | Obs::Stale { .. } | Obs::Partial { .. } => return Err(Block::Pending),
     };
-    if git.private_modules {
-        return Err(Block::PrivateSubmodules);
-    }
     if let Some(operation) = git.in_progress {
         return Err(Block::InProgress(operation.describe()));
     }

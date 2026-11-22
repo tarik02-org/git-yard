@@ -95,8 +95,6 @@ pub struct GcApp<C: Control> {
     /// Also list main worktrees and blocked rows, which cannot be removed.
     pub show_all: bool,
     pub toast: Toast,
-    /// Startup messages, such as recovered removals.
-    pub notices: Vec<String>,
     /// Removed rows hidden by `C`.
     pub compacted: HashSet<WorktreeKey>,
     pub measure_paused: bool,
@@ -125,7 +123,6 @@ impl<C: Control> GcApp<C> {
             help: false,
             show_all: false,
             toast: Toast::default(),
-            notices: Vec::new(),
             compacted: HashSet::new(),
             measure_paused: false,
             quitting: false,
@@ -239,7 +236,6 @@ impl<C: Control> GcApp<C> {
     }
 
     pub fn on_key(&mut self, key: KeyEvent) -> Flow<Exit> {
-        self.notices.clear();
         let ctrl = key.modifiers.contains(KeyModifiers::CONTROL);
         if ctrl && key.code == KeyCode::Char('c') {
             self.delete_now_armed = false;
@@ -545,7 +541,6 @@ impl<C: Control> GcApp<C> {
     }
 
     pub fn on_mouse(&mut self, mouse: MouseEvent) {
-        self.notices.clear();
         self.delete_now_armed = false;
         match mouse.kind {
             MouseEventKind::ScrollDown => self.move_focus(3),
@@ -619,7 +614,7 @@ impl<C: Control> GcApp<C> {
                 // A retry needs fresh evidence.
                 self.control.rescan(key.repo());
             }
-            if !matches!(outcome, Outcome::Cancelled) && !outcome.is_clean_success() {
+            if !matches!(outcome, Outcome::Cancelled) && !outcome.is_removed() {
                 self.toast.say(format!("{}: {outcome}", self.path_of(&key)));
             }
         }
@@ -745,7 +740,6 @@ mod tests {
                     status: Some(StatusEvidence::default()),
                     unreachable_commits: false,
                     in_progress: None,
-                    private_modules: false,
                     bases: vec![BaseRef {
                         name: "main".into(),
                         oid: "b".into(),
@@ -754,7 +748,6 @@ mod tests {
                 },
                 observed_at: 0,
             },
-            watermark: Some(0),
         });
         app.apply(Event::Storage {
             key,
@@ -816,10 +809,7 @@ mod tests {
         assert!(matches!(app.on_signal(true), Flow::Exit(Exit::Forced)));
         app.apply(Event::Removal {
             key: key("a"),
-            state: RemovalState::Finished(Outcome::Removed {
-                branch: None,
-                warnings: vec![],
-            }),
+            state: RemovalState::Finished(Outcome::Removed { branch: None }),
         });
         assert_eq!(app.finished(), Some(Exit::Clean));
     }
